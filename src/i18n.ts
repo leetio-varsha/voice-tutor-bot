@@ -81,6 +81,9 @@ export interface UiText {
   timezone: (zone: string, clock: string) => string;
   addTime: string;
   changeTimezone: string;
+  /** Settings button; carries a hint in the other language in case the course was picked by mistake. */
+  changeCourse: string;
+  courseSwitchNote: string;
   addReminder: string;
   pickHour: string;
   pickTime: string;
@@ -199,6 +202,8 @@ export const UI: Record<Lang, UiText> = {
     timezone: (zone, clock) => `🌍 Timezone: ${zone} (now ${clock})`,
     addTime: "➕ Add time",
     changeTimezone: "🌍 Change timezone",
+    changeCourse: "🌐 Learning Russian · Сменить язык",
+    courseSwitchNote: "Switching ends the current lesson. Your words and tutor notes are kept.\nТекущий урок закончится, слова и заметки тьютора сохранятся.",
     addReminder: "⏰ Add a reminder",
     pickHour: "Pick the hour:",
     pickTime: "Pick the time:",
@@ -327,6 +332,8 @@ export const UI: Record<Lang, UiText> = {
     timezone: (zone, clock) => `🌍 Часовой пояс: ${zone} (сейчас ${clock})`,
     addTime: "➕ Добавить время",
     changeTimezone: "🌍 Сменить пояс",
+    changeCourse: "🌐 Учу английский · Change language",
+    courseSwitchNote: "Текущий урок закончится, слова и заметки тьютора сохранятся.\nSwitching ends the current lesson. Your words and tutor notes are kept.",
     addReminder: "⏰ Новое напоминание",
     pickHour: "Выбери час:",
     pickTime: "Выбери время:",
