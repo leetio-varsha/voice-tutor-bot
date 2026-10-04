@@ -2,6 +2,7 @@ import { Composer, InputFile } from "grammy";
 import { toTelegramVoice } from "../audio.js";
 import { config, isValidTime, isValidTimezone, type TtsProviderId } from "../config.js";
 import type { BotContext } from "../context.js";
+import { isLang, type Lang } from "../courses.js";
 import * as store from "../store.js";
 import { getTtsProvider, setTtsProvider, synthesize } from "../tts/index.js";
 import { esc, spoiler } from "../ui.js";
@@ -11,16 +12,21 @@ export const admin = new Composer<BotContext>();
 
 const isOwner = (ctx: BotContext) => ctx.from?.id === config.ownerUserId;
 
-const VOICE_TEST_TEXT =
-  "Извините, вы не подскажете, как пройти к метро? Ой, ну ты даёшь! Я вообще не ожидал тебя здесь увидеть. Кстати, этот старинный замок закрыт на тяжёлый замок.";
+const VOICE_TEST_TEXT: Record<Lang, string> = {
+  ru: "Извините, вы не подскажете, как пройти к метро? Ой, ну ты даёшь! Я вообще не ожидал тебя здесь увидеть. Кстати, этот старинный замок закрыт на тяжёлый замок.",
+  en: "Excuse me, do you know how to get to the subway? Oh, come on! I didn't expect to see you here at all. By the way, I read that book you lent me, and I'll read the next one soon.",
+};
 
+/** /voices [ru|en]: the same phrase in every configured TTS provider (Russian by default). */
 admin.command("voices", async (ctx) => {
   if (!isOwner(ctx)) return;
+  const arg = ctx.match.trim();
+  const lang: Lang = isLang(arg) ? arg : "ru";
   const providers = [...config.availableTts].sort(() => Math.random() - 0.5);
   const labels = providers.map((_, i) => String.fromCharCode(65 + i));
   for (const [i, provider] of providers.entries()) {
     await ctx.replyWithChatAction("record_voice");
-    const voice = await toTelegramVoice(await synthesize(VOICE_TEST_TEXT, provider));
+    const voice = await toTelegramVoice(await synthesize(VOICE_TEST_TEXT[lang], lang, provider));
     await ctx.replyWithVoice(new InputFile(voice, `voice-${labels[i]}.ogg`), { caption: `Voice ${labels[i]}` });
   }
   const mapping = providers.map((provider, i) => `${labels[i]} = ${provider}`).join(", ");
@@ -40,6 +46,19 @@ admin.command("voice", async (ctx) => {
   await ctx.reply(`Voice switched to ${requested}.`);
 });
 
+/** /course <userId> ru|en: fixes a learner's course if they picked the wrong one on /start. */
+admin.command("course", async (ctx) => {
+  if (!isOwner(ctx)) return;
+  const [idArg, langArg] = ctx.match.trim().split(/\s+/).filter(Boolean);
+  const learner = (await store.listLearners()).find((l) => l.id === Number(idArg));
+  if (!learner || !isLang(langArg)) {
+    await ctx.reply("Usage: /course <userId> ru|en (ru = learning Russian, en = learning English)");
+    return;
+  }
+  await store.setLearning(learner.id, langArg);
+  await ctx.reply(`${learner.firstName} now learns ${langArg === "ru" ? "Russian" : "English"}. Their tutor notes are kept as they were; /notes ${learner.id} to review them.`);
+});
+
 /**
  * /schedule                                  show all learners' schedules
  * /schedule <userId> 09:00,19:00 Europe/Berlin set times and timezone
@@ -51,7 +70,7 @@ admin.command("schedule", async (ctx) => {
   const [idArg, timesArg, tzArg] = ctx.match.trim().split(/\s+/).filter(Boolean);
   if (!idArg) {
     const lines = learners.map(
-      (l) => `${l.id} ${esc(l.firstName)}: ${l.lessonTimes.join(", ")} ${l.timezone}, reminders ${l.remindersEnabled ? "on" : "off"}`,
+      (l) => `${l.id} ${esc(l.firstName)} [${l.learning ?? "no course"}]: ${l.lessonTimes.join(", ")} ${l.timezone}, reminders ${l.remindersEnabled ? "on" : "off"}`,
     );
     await ctx.reply(lines.join("\n") || "No learners yet.\n\nUsage: /schedule <userId> 09:00,19:00 Europe/Berlin");
     return;

@@ -1,11 +1,13 @@
 import { Composer, InlineKeyboard, InputFile } from "grammy";
 import { toTelegramVoice } from "../audio.js";
 import { onButton, type BotContext } from "../context.js";
+import type { Course } from "../courses.js";
+import { menuLabels, type UiText } from "../i18n.js";
 import { finishCurrentLesson } from "../lessons.js";
 import * as store from "../store.js";
 import type { Word } from "../store.js";
 import * as tutor from "../tutor.js";
-import { esc, MENU } from "../ui.js";
+import { esc } from "../ui.js";
 import { renderVoice, sendVoice, SLOWER_TEMPO, withChatAction } from "../voice.js";
 
 export const words = new Composer<BotContext>();
@@ -15,13 +17,16 @@ const WORD_BUTTONS_PER_ROW = 5;
 
 type WordListMode = "listen" | "edit";
 
+const slowerButton = (t: UiText) => new InlineKeyboard().text(t.slower, "slower");
+
 /**
  * A word list message. The word ids live in its buttons (say:<id> / del:<id>), so any list
  * message can be edited or played later without server-side state about what it showed.
  */
-function wordListView(list: Word[], title: string, mode: WordListMode) {
-  const lines = list.map((w, i) => `${i + 1}. <b>${esc(w.ru)}</b> - ${esc(w.en)}`);
-  const text = `${esc(title)}\n\n${lines.join("\n") || "(empty)"}`;
+function wordListView(ctx: BotContext, list: Word[], title: string, mode: WordListMode) {
+  const { t } = ctx;
+  const lines = list.map((w, i) => `${i + 1}. ${wordLine(ctx.course, w)}`);
+  const text = `${esc(title)}\n\n${lines.join("\n") || esc(t.empty)}`;
 
   const keyboard = new InlineKeyboard();
   list.forEach((w, i) => {
@@ -31,13 +36,16 @@ function wordListView(list: Word[], title: string, mode: WordListMode) {
   });
   keyboard.row();
   if (mode === "listen") {
-    if (list.length) keyboard.text("🔊 Listen to all", "say:all").primary().row().text("✏️ Edit", "words:edit");
-    keyboard.text("➕ Add word", "words:add");
+    if (list.length) keyboard.text(t.listenToAll, "say:all").primary().row().text(t.edit, "words:edit");
+    keyboard.text(t.addWord, "words:add");
   } else {
-    keyboard.text("✅ Done", "words:done").success();
+    keyboard.text(t.done, "words:done").success();
   }
   return { text, keyboard };
 }
+
+/** "<b>word</b> - translation", with the side the learner studies first. */
+const wordLine = (course: Course, w: Word) => `<b>${esc(w[course.target])}</b> - ${esc(w[course.native])}`;
 
 /** Word ids and title recovered from the list message whose button was pressed. */
 function listOnMessage(ctx: BotContext): { ids: number[]; title: string } {
@@ -48,19 +56,18 @@ function listOnMessage(ctx: BotContext): { ids: number[]; title: string } {
     return match ? [Number(match[1])] : [];
   });
   const text = message && "text" in message ? (message.text ?? "") : "";
-  return { ids, title: text.split("\n\n")[0] || "Your words:" };
+  return { ids, title: text.split("\n\n")[0] || ctx.t.yourWords };
 }
 
-words.hears(MENU.words, async (ctx) => {
-  const { words: latest, total } = await store.latestWords(ctx.learner.id, WORD_LIST_LIMIT);
+words.hears(menuLabels("words"), async (ctx) => {
+  const { t } = ctx;
+  const { words: latest, total } = await store.latestWords(ctx.learner.id, ctx.course.target, WORD_LIST_LIMIT);
   if (total === 0) {
-    await ctx.reply("No words yet. Have a conversation, or add your own.", {
-      reply_markup: new InlineKeyboard().text("➕ Add word", "words:add"),
-    });
+    await ctx.reply(t.noWordsYet, { reply_markup: new InlineKeyboard().text(t.addWord, "words:add") });
     return;
   }
-  const title = total > latest.length ? `Your words (latest ${latest.length} of ${total}):` : "Your words:";
-  const view = wordListView(latest, title, "listen");
+  const title = total > latest.length ? t.yourLatestWords(latest.length, total) : t.yourWords;
+  const view = wordListView(ctx, latest, title, "listen");
   await ctx.reply(view.text, { parse_mode: "HTML", reply_markup: view.keyboard });
 });
 
@@ -69,27 +76,29 @@ onButton(words, "finish", async (ctx) => {
   const lessonWords = session.lessonId !== undefined ? await store.lessonWords(session.lessonId) : [];
   await finishCurrentLesson(session, learner.id);
   if (lessonWords.length === 0) {
-    await ctx.reply("Отлично поработали! See you next time.");
+    await ctx.reply(ctx.t.sessionDone);
     return;
   }
-  const view = wordListView(lessonWords.slice(-WORD_LIST_LIMIT), "Отлично поработали! Words from this session:", "listen");
+  const view = wordListView(ctx, lessonWords.slice(-WORD_LIST_LIMIT), ctx.t.sessionWords, "listen");
   await ctx.reply(view.text, { parse_mode: "HTML", reply_markup: view.keyboard });
 });
 
 onButton(words, /^say:(\d+)$/, async (ctx) => {
   const word = await store.findWord(ctx.learner.id, Number(ctx.match[1]));
   if (!word) return;
+  const { course } = ctx;
   await ctx.replyWithChatAction("record_voice");
-  await sendVoice(ctx, await renderVoice(ctx.session, word.ru), `<b>${esc(word.ru)}</b> - ${esc(word.en)}`, new InlineKeyboard().text("🐢 Slower", "slower"));
+  await sendVoice(ctx, await renderVoice(ctx.session, word[course.target], course.target), wordLine(course, word), slowerButton(ctx.t));
 });
 
 onButton(words, "say:all", async (ctx) => {
   const list = await store.findWords(ctx.learner.id, listOnMessage(ctx).ids);
   if (list.length === 0) return;
+  const { course } = ctx;
   await withChatAction(ctx, "record_voice", async () => {
     // Ellipses give TTS voices a clear pause between phrases.
-    const voice = await renderVoice(ctx.session, list.map((w) => w.ru.replace(/[.…]+$/, "")).join(" … "));
-    await sendVoice(ctx, voice, list.map((w) => esc(w.ru)).join(" · "), new InlineKeyboard().text("🐢 Slower", "slower"));
+    const voice = await renderVoice(ctx.session, list.map((w) => w[course.target].replace(/[.…]+$/, "")).join(" … "), course.target);
+    await sendVoice(ctx, voice, list.map((w) => esc(w[course.target])).join(" · "), slowerButton(ctx.t));
   });
 });
 
@@ -98,7 +107,7 @@ onButton(words, "slower", async (ctx) => {
   if (!session.lastAudio) return;
   await ctx.replyWithChatAction("record_voice");
   const voice = await toTelegramVoice(session.lastAudio, SLOWER_TEMPO);
-  await ctx.replyWithVoice(new InputFile(voice, "slower.ogg"), { caption: "🐢 Slower" });
+  await ctx.replyWithVoice(new InputFile(voice, "slower.ogg"), { caption: ctx.t.slower });
 });
 
 // --- editing the list in place ---
@@ -106,34 +115,34 @@ onButton(words, "slower", async (ctx) => {
 onButton(words, "words:edit", async (ctx) => {
   const { ids, title } = listOnMessage(ctx);
   const list = await store.findWords(ctx.learner.id, ids);
-  await ctx.editMessageReplyMarkup({ reply_markup: wordListView(list, title, "edit").keyboard });
+  await ctx.editMessageReplyMarkup({ reply_markup: wordListView(ctx, list, title, "edit").keyboard });
 });
 
 onButton(words, "words:done", async (ctx) => {
   const { ids, title } = listOnMessage(ctx);
   const list = await store.findWords(ctx.learner.id, ids);
-  await ctx.editMessageReplyMarkup({ reply_markup: wordListView(list, title, "listen").keyboard });
+  await ctx.editMessageReplyMarkup({ reply_markup: wordListView(ctx, list, title, "listen").keyboard });
 });
 
 onButton(words, /^del:(\d+)$/, async (ctx) => {
   const id = Number(ctx.match[1]);
   const { ids, title } = listOnMessage(ctx);
   await store.deleteWord(ctx.learner.id, id);
-  const view = wordListView(await store.findWords(ctx.learner.id, ids.filter((wordId) => wordId !== id)), title, "edit");
+  const view = wordListView(ctx, await store.findWords(ctx.learner.id, ids.filter((wordId) => wordId !== id)), title, "edit");
   await ctx.editMessageText(view.text, { parse_mode: "HTML", reply_markup: view.keyboard });
 });
 
 onButton(words, "words:add", async (ctx) => {
   ctx.session.awaiting = "word";
-  await ctx.reply("Send a word or phrase to save: type it or say it. Russian or English both work.");
+  await ctx.reply(ctx.t.addWordPrompt);
 });
 
 export async function saveWord(ctx: BotContext, input: string): Promise<void> {
-  const { session, learner } = ctx;
+  const { session, learner, course, t } = ctx;
   session.awaiting = undefined;
-  const [word] = await store.addWords(learner.id, session.lessonId ?? null, "manual", [await tutor.translateWord(input)]);
-  await ctx.reply(`${word!.isNew ? "Added" : "Already in your list"}: <b>${esc(word!.ru)}</b> - ${esc(word!.en)}`, {
+  const [word] = await store.addWords(learner.id, course.target, session.lessonId ?? null, "manual", [await tutor.translateWord(course, input)]);
+  await ctx.reply(`${esc(word!.isNew ? t.added : t.alreadyInList)}: ${wordLine(course, word!)}`, {
     parse_mode: "HTML",
-    reply_markup: new InlineKeyboard().text("🔊 Listen", `say:${word!.id}`).text("➕ Add another", "words:add"),
+    reply_markup: new InlineKeyboard().text(t.listen, `say:${word!.id}`).text(t.addAnother, "words:add"),
   });
 }

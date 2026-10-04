@@ -1,4 +1,5 @@
 import { config } from "./config.js";
+import type { Lang } from "./courses.js";
 import { pool } from "./db.js";
 
 // --- learners ---
@@ -11,6 +12,8 @@ export interface Learner {
   remindersEnabled: boolean;
   tutorNotes: string;
   nextFocus: string;
+  /** The language they study; null until they pick it on /start. */
+  learning: Lang | null;
 }
 
 interface LearnerRow {
@@ -21,6 +24,7 @@ interface LearnerRow {
   reminders_enabled: boolean;
   tutor_notes: string;
   next_focus: string;
+  learning: Lang | null;
 }
 
 const toLearner = (row: LearnerRow): Learner => ({
@@ -31,6 +35,7 @@ const toLearner = (row: LearnerRow): Learner => ({
   remindersEnabled: row.reminders_enabled,
   tutorNotes: row.tutor_notes,
   nextFocus: row.next_focus,
+  learning: row.learning,
 });
 
 export async function ensureLearner(telegramId: number, firstName: string): Promise<Learner> {
@@ -51,6 +56,10 @@ export async function listLearners(): Promise<Learner[]> {
 
 export async function saveTutorNotes(learnerId: number, notes: string, nextFocus: string): Promise<void> {
   await pool.query(`UPDATE learners SET tutor_notes = $2, next_focus = $3 WHERE telegram_id = $1`, [learnerId, notes, nextFocus]);
+}
+
+export async function setLearning(learnerId: number, learning: Lang): Promise<void> {
+  await pool.query(`UPDATE learners SET learning = $2 WHERE telegram_id = $1`, [learnerId, learning]);
 }
 
 export async function saveSchedule(learnerId: number, lessonTimes: string[], timezone: string, remindersEnabled: boolean): Promise<void> {
@@ -213,9 +222,13 @@ export interface Word {
   en: string;
 }
 
-/** Saves words, skipping ones already in the learner's list (case-insensitive). Returns each stored word and whether it is new. */
+/**
+ * Saves words, skipping ones already in the learner's list (case-insensitive on the side they learn).
+ * Returns each stored word and whether it is new.
+ */
 export async function addWords(
   learnerId: number,
+  learning: Lang,
   lessonId: number | null,
   source: "lesson" | "manual",
   words: { ru: string; en: string }[],
@@ -223,10 +236,10 @@ export async function addWords(
   const saved: (Word & { isNew: boolean })[] = [];
   for (const word of words) {
     const { rows } = await pool.query<Word & { is_new: boolean }>(
-      `INSERT INTO words (learner_id, ru, en, source, lesson_id) VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (learner_id, lower(ru)) DO UPDATE SET ru = words.ru
+      `INSERT INTO words (learner_id, learning, ru, en, source, lesson_id) VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (learner_id, learning, lower(CASE learning WHEN 'en' THEN en ELSE ru END)) DO UPDATE SET ru = words.ru
        RETURNING id, ru, en, (xmax = 0) AS is_new`,
-      [learnerId, word.ru.trim(), word.en.trim(), source, lessonId],
+      [learnerId, learning, word.ru.trim(), word.en.trim(), source, lessonId],
     );
     const row = rows[0]!;
     saved.push({ id: row.id, ru: row.ru, en: row.en, isNew: row.is_new });
@@ -249,10 +262,10 @@ export async function deleteWord(learnerId: number, wordId: number): Promise<voi
   await pool.query(`DELETE FROM words WHERE learner_id = $1 AND id = $2`, [learnerId, wordId]);
 }
 
-export async function latestWords(learnerId: number, limit: number): Promise<{ words: Word[]; total: number }> {
+export async function latestWords(learnerId: number, learning: Lang, limit: number): Promise<{ words: Word[]; total: number }> {
   const { rows } = await pool.query<Word & { total: number }>(
-    `SELECT id, ru, en, count(*) OVER ()::int AS total FROM words WHERE learner_id = $1 ORDER BY id DESC LIMIT $2`,
-    [learnerId, limit],
+    `SELECT id, ru, en, count(*) OVER ()::int AS total FROM words WHERE learner_id = $1 AND learning = $2 ORDER BY id DESC LIMIT $3`,
+    [learnerId, learning, limit],
   );
   return { words: rows.reverse().map(({ id, ru, en }) => ({ id, ru, en })), total: rows[0]?.total ?? 0 };
 }

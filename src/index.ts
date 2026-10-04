@@ -1,7 +1,8 @@
-import { Bot, GrammyError } from "grammy";
+import { Bot, GrammyError, InlineKeyboard } from "grammy";
 import { toWav16k } from "./audio.js";
 import { assertBotConfig, config } from "./config.js";
-import type { BotContext } from "./context.js";
+import { onButton, type BotContext } from "./context.js";
+import { COURSES, isLang } from "./courses.js";
 import { migrate, pool } from "./db.js";
 import { admin } from "./features/admin.js";
 import { assessRepeat, checkDictation, drills } from "./features/drills.js";
@@ -9,13 +10,14 @@ import { progress } from "./features/progress.js";
 import { saveCityTimezone, settings } from "./features/settings.js";
 import { handleLearnerLine, talk } from "./features/talk.js";
 import { saveWord, words } from "./features/words.js";
+import { ALL_MENU_LABELS, COURSE_PICKER, UI, type UiText } from "./i18n.js";
 import { restoreSession } from "./lessons.js";
 import { startScheduler } from "./scheduler.js";
 import { getSession } from "./session.js";
 import { recognize } from "./speech/stt.js";
 import * as store from "./store.js";
 import { getTtsProvider } from "./tts/index.js";
-import { MENU, mainMenu } from "./ui.js";
+import { mainMenu } from "./ui.js";
 import { downloadVoice, withChatAction } from "./voice.js";
 
 const { telegramToken } = assertBotConfig();
@@ -30,17 +32,42 @@ bot.use(async (ctx, next) => {
   if (userId !== undefined && config.allowedUserIds.includes(userId)) return next();
   console.warn(`Blocked update from user ${userId ?? "unknown"}`);
   if (ctx.chat?.type === "private") {
-    await ctx.reply(`This bot is private. Your Telegram user id is ${userId}; ask the owner to add it to ALLOWED_USER_IDS.`);
+    await ctx.reply(
+      `This bot is private. Your Telegram user id is ${userId}; ask the owner to add it to ALLOWED_USER_IDS.\n\nЭто закрытый бот. Твой Telegram id: ${userId}. Попроси владельца добавить его в ALLOWED_USER_IDS.`,
+    );
   }
 });
 
 // --- learner profile and in-progress lesson state for every update ---
 
+const coursePicker = () =>
+  new InlineKeyboard().text(COURSE_PICKER.ru, "course:ru").row().text(COURSE_PICKER.en, "course:en");
+
+const welcome = (t: UiText) => t.welcome.join("\n");
+
 bot.use(async (ctx, next) => {
   const learner = await store.ensureLearner(ctx.from!.id, ctx.from!.first_name);
-  await restoreSession(learner);
   ctx.learner = learner;
   ctx.session = getSession(learner.id);
+
+  // A new learner picks what they study before anything else; the interface language follows from it.
+  if (!learner.learning) {
+    const picked = /^course:(ru|en)$/.exec(ctx.callbackQuery?.data ?? "")?.[1];
+    if (!isLang(picked)) {
+      await ctx.reply(COURSE_PICKER.question, { reply_markup: coursePicker() });
+      return;
+    }
+    await ctx.answerCallbackQuery().catch(() => {});
+    await store.setLearning(learner.id, picked);
+    learner.learning = picked;
+    const t = UI[COURSES[picked].native];
+    await ctx.reply(welcome(t), { reply_markup: mainMenu(t) });
+    return;
+  }
+
+  ctx.course = COURSES[learner.learning];
+  ctx.t = UI[ctx.course.native];
+  await restoreSession(learner);
   await next();
 });
 
@@ -48,40 +75,28 @@ bot.use(async (ctx, next) => {
 bot.use(async (ctx, next) => {
   const text = ctx.message?.text;
   const data = ctx.callbackQuery?.data;
-  const isNavigation = text !== undefined && ((Object.values(MENU) as string[]).includes(text) || text.startsWith("/"));
+  const isNavigation = text !== undefined && (ALL_MENU_LABELS.includes(text) || text.startsWith("/"));
   if (isNavigation || (data !== undefined && data !== "words:add" && data !== "set:city")) ctx.session.awaiting = undefined;
   await next();
 });
 
-bot.command(["start", "menu"], (ctx) =>
-  ctx.reply(
-    [
-      "Привет! I'm your Russian speaking coach.",
-      "",
-      `${MENU.talk}: a role-play conversation, voice in and voice out`,
-      `${MENU.repeat}: say a phrase and get a pronunciation score`,
-      `${MENU.dictation}: listen and type what you hear`,
-      `${MENU.progress}: your streak and how you're improving`,
-      `${MENU.settings}: reminder times and timezone`,
-      "",
-      "Or just hold the mic and say something in Russian.",
-    ].join("\n"),
-    { reply_markup: mainMenu },
-  ),
-);
+bot.command(["start", "menu"], (ctx) => ctx.reply(welcome(ctx.t), { reply_markup: mainMenu(ctx.t) }));
+
+// A course picker pressed again after the course is set (e.g. an old message): the course stays; changing it is /course for the owner.
+onButton(bot, /^course:(ru|en)$/, (ctx) => ctx.reply(welcome(ctx.t), { reply_markup: mainMenu(ctx.t) }));
 
 bot.use(talk, drills, words, progress, settings, admin);
 
 // --- incoming voice and text that no button handler took ---
 
 bot.on("message:voice", async (ctx) => {
-  const { session } = ctx;
+  const { session, course, t } = ctx;
   if (session.awaiting === "city") {
-    await ctx.reply("Please type the city name.");
+    await ctx.reply(t.typeCityName);
     return;
   }
   if (session.mode === "dictation" && session.awaiting !== "word") {
-    await ctx.reply("For dictation, type the sentence you heard.");
+    await ctx.reply(t.dictationNeedsTyping);
     return;
   }
   await withChatAction(ctx, "typing", async () => {
@@ -93,10 +108,10 @@ bot.on("message:voice", async (ctx) => {
       return;
     }
 
-    const rec = await recognize(wav);
+    const rec = await recognize(wav, { lang: course.target });
     console.log(`[timing] voice download + recognition ${Date.now() - started} ms`);
     if (!rec.text) {
-      await ctx.reply("I couldn't make out any speech there. Try again a bit closer to the mic.");
+      await ctx.reply(t.noSpeech);
       return;
     }
     if (session.awaiting === "word") {
@@ -111,7 +126,7 @@ bot.on("message:text", async (ctx) => {
   const { session } = ctx;
   const text = ctx.message.text.trim();
   if (text.startsWith("/")) {
-    await ctx.reply("Use the menu below.", { reply_markup: mainMenu });
+    await ctx.reply(ctx.t.useMenu, { reply_markup: mainMenu(ctx.t) });
     return;
   }
   await withChatAction(ctx, "typing", async () => {
@@ -125,10 +140,14 @@ bot.on("message:text", async (ctx) => {
 bot.catch(async (err) => {
   console.error(`Error while handling update ${err.ctx.update.update_id}:`, err.error);
   const message = err.error instanceof Error ? err.error.message : String(err.error);
-  await err.ctx.reply(`Sorry, something went wrong: ${message}`).catch(() => {});
+  // The error can come before the learner's course is known (e.g. the database is down).
+  const prefix = err.ctx.t?.somethingWentWrong ?? UI.en.somethingWentWrong;
+  await err.ctx.reply(`${prefix}: ${message}`).catch(() => {});
 });
 
 await bot.api.setMyCommands([{ command: "menu", description: "Show the main menu" }]);
+// Telegram shows this one to users whose app language is Russian.
+await bot.api.setMyCommands([{ command: "menu", description: "Главное меню" }], { language_code: "ru" });
 
 const scheduler = startScheduler(bot.api);
 

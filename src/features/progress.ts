@@ -3,7 +3,8 @@ import { onButton, type BotContext } from "../context.js";
 import * as store from "../store.js";
 import type { Learner } from "../store.js";
 import { localNow, shiftDate } from "../time.js";
-import { esc, MENU } from "../ui.js";
+import { menuLabels, type UiText } from "../i18n.js";
+import { esc } from "../ui.js";
 
 export const progress = new Composer<BotContext>();
 
@@ -19,40 +20,39 @@ export function streakDays(activeDays: string[], today: string): number {
   return streak;
 }
 
-export async function progressReport(learner: Learner, heading: string): Promise<string> {
+export async function progressReport(learner: Learner, t: UiText, heading: string): Promise<string> {
   const today = localNow(learner.timezone).date;
   const stats = await store.progressStats(learner.id, learner.timezone, today);
   const streak = streakDays(stats.activeDays, today);
   const goal = learner.lessonTimes.length || 2;
 
-  let pronunciation = "";
-  if (stats.pronThisWeek !== null) {
-    const trend =
-      stats.pronLastWeek === null ? "" : ` (${stats.pronThisWeek >= stats.pronLastWeek ? "↑" : "↓"} from ${Math.round(stats.pronLastWeek)})`;
-    pronunciation = `, average score ${Math.round(stats.pronThisWeek)}${trend}`;
-  }
+  const { pronThisWeek, pronLastWeek } = stats;
+  const pronunciation =
+    pronThisWeek === null
+      ? ""
+      : t.averageScore(Math.round(pronThisWeek), pronLastWeek === null ? null : Math.round(pronLastWeek), pronLastWeek === null || pronThisWeek >= pronLastWeek);
 
   const lines = [
     `<b>${esc(heading)}</b>`,
     "",
-    streak > 0 ? `🔥 Streak: ${streak} ${streak === 1 ? "day" : "days"}` : "🔥 Streak: start one today",
-    `Today: ${Math.min(stats.sessionsToday, goal)} of ${goal} sessions`,
+    streak > 0 ? t.streak(streak) : t.noStreak,
+    t.today(Math.min(stats.sessionsToday, goal), goal),
     "",
-    "<b>Last 7 days</b>",
-    `• Sessions: ${stats.sessions} (~${stats.minutes} min)`,
-    `• Spoken replies: ${stats.spokenReplies}${stats.typedReplies ? `, typed: ${stats.typedReplies}` : ""}`,
-    `• Drills: ${stats.drills}${pronunciation}`,
-    `• Words: ${stats.wordsTotal} total, ${stats.wordsThisWeek} new`,
+    `<b>${esc(t.last7Days)}</b>`,
+    t.sessions(stats.sessions, stats.minutes),
+    t.spokenReplies(stats.spokenReplies, stats.typedReplies),
+    t.drills(stats.drills) + pronunciation,
+    t.words(stats.wordsTotal, stats.wordsThisWeek),
   ];
-  if (learner.nextFocus) lines.push("", `🎯 Next focus: ${esc(learner.nextFocus)}`);
+  if (learner.nextFocus) lines.push("", `${esc(t.nextFocus)}: ${esc(learner.nextFocus)}`);
   return lines.join("\n");
 }
 
-export const practiceButtons = () => new InlineKeyboard().text("🗣 Talk", "menu:talk").text("🎧 Pronunciation drill", "repeat:next");
+export const practiceButtons = (t: UiText) => new InlineKeyboard().text(t.menu.talk, "menu:talk").text(t.pronunciationDrill, "repeat:next");
 
 const showProgress = async (ctx: BotContext) => {
-  await ctx.reply(await progressReport(ctx.learner, "📈 Your progress"), { parse_mode: "HTML", reply_markup: practiceButtons() });
+  await ctx.reply(await progressReport(ctx.learner, ctx.t, ctx.t.progressHeading), { parse_mode: "HTML", reply_markup: practiceButtons(ctx.t) });
 };
 
-progress.hears(MENU.progress, showProgress);
+progress.hears(menuLabels("progress"), showProgress);
 onButton(progress, "menu:progress", showProgress);

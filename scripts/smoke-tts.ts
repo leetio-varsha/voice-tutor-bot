@@ -17,7 +17,7 @@ await mkdir("out", { recursive: true });
 for (const provider of config.availableTts) {
   const started = Date.now();
   try {
-    const voice = await toTelegramVoice(await synthesize(TEXT, provider));
+    const voice = await toTelegramVoice(await synthesize(TEXT, "ru", provider));
     await writeFile(`out/voice-${provider}.ogg`, voice);
     console.log(`${provider}: out/voice-${provider}.ogg (${Date.now() - started} ms)`);
   } catch (err) {

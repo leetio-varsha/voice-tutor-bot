@@ -67,7 +67,17 @@ CREATE TABLE IF NOT EXISTS words (
   lesson_id BIGINT REFERENCES lessons (id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS words_learner_ru ON words (learner_id, lower(ru));
+
+-- The language each learner studies (src/courses.ts). Learners from before courses existed were learning
+-- Russian; new learners pick on /start, so after the backfill the column has no default (NULL = not picked).
+ALTER TABLE learners ADD COLUMN IF NOT EXISTS learning TEXT DEFAULT 'ru' CHECK (learning IN ('ru', 'en'));
+ALTER TABLE learners ALTER COLUMN learning DROP DEFAULT;
+
+-- A word is unique by its learned side: ru for Russian learners, en for English learners
+-- (two English words can share one Russian translation, and the other way round).
+ALTER TABLE words ADD COLUMN IF NOT EXISTS learning TEXT NOT NULL DEFAULT 'ru' CHECK (learning IN ('ru', 'en'));
+DROP INDEX IF EXISTS words_learner_ru;
+CREATE UNIQUE INDEX IF NOT EXISTS words_learner_term ON words (learner_id, learning, lower(CASE learning WHEN 'en' THEN en ELSE ru END));
 
 CREATE TABLE IF NOT EXISTS sent_notifications (
   learner_id BIGINT NOT NULL REFERENCES learners (telegram_id),
