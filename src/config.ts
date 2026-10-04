@@ -24,14 +24,21 @@ const azure =
     ? {
         key: required("AZURE_SPEECH_KEY"),
         region: required("AZURE_SPEECH_REGION"),
-        ttsVoice: optional("AZURE_TTS_VOICE") ?? "ru-RU-SvetlanaNeural",
+        ttsVoices: {
+          ru: optional("AZURE_TTS_VOICE") ?? "ru-RU-SvetlanaNeural",
+          en: optional("AZURE_TTS_VOICE_EN") ?? "en-US-AvaNeural",
+        },
       }
     : undefined;
 
 const elevenlabs = optional("ELEVENLABS_API_KEY")
   ? {
       apiKey: required("ELEVENLABS_API_KEY"),
-      voiceId: required("ELEVENLABS_VOICE_ID"),
+      voiceIds: {
+        ru: required("ELEVENLABS_VOICE_ID"),
+        // eleven_v3 voices are multilingual, so the Russian voice also works for English.
+        en: optional("ELEVENLABS_VOICE_ID_EN") ?? required("ELEVENLABS_VOICE_ID"),
+      },
       modelId: optional("ELEVENLABS_MODEL_ID") ?? "eleven_v3",
     }
   : undefined;

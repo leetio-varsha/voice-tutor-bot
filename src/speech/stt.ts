@@ -1,5 +1,6 @@
 import { wavDurationSec } from "../audio.js";
 import { config } from "../config.js";
+import { COURSES, type Lang } from "../courses.js";
 import type { PronunciationResult, Recognition } from "./types.js";
 
 // Azure short-audio REST limits: 60 s for recognition, 30 s with pronunciation assessment.
@@ -8,13 +9,15 @@ const AZURE_MAX_SEC = 60;
 const AZURE_ASSESS_MAX_SEC = 30;
 
 export interface RecognizeOptions {
+  /** The language the learner is expected to speak. */
+  lang: Lang;
   /** Known target text (listen-and-repeat): one scripted assessment call. */
   referenceText?: string;
 }
 
-export async function recognize(wav: Buffer, options: RecognizeOptions = {}): Promise<Recognition> {
+export async function recognize(wav: Buffer, options: RecognizeOptions): Promise<Recognition> {
   if (config.azure) return recognizeAzure(wav, options);
-  if (config.openai) return { text: await transcribeOpenAI(wav) };
+  if (config.openai) return { text: await transcribeOpenAI(wav, options.lang) };
   throw new Error("No speech-to-text provider configured");
 }
 
@@ -23,9 +26,9 @@ export async function recognize(wav: Buffer, options: RecognizeOptions = {}): Pr
  * word was said, not whether it was the right word (a wrong word said clearly still scores high).
  * Returns undefined when Azure isn't configured or the clip is too long to assess.
  */
-export async function assessClarity(wav: Buffer, recognizedLexical: string): Promise<PronunciationResult | undefined> {
+export async function assessClarity(wav: Buffer, recognizedLexical: string, lang: Lang): Promise<PronunciationResult | undefined> {
   if (!config.azure || !recognizedLexical || wavDurationSec(wav) > AZURE_ASSESS_MAX_SEC) return undefined;
-  const data = await azureRequest(wav, assessmentParams(recognizedLexical, false));
+  const data = await azureRequest(wav, lang, assessmentParams(recognizedLexical, false));
   return parsePronunciation(data.NBest?.[0]);
 }
 
@@ -58,9 +61,9 @@ interface AzureResponse {
   NBest?: AzureNBest[];
 }
 
-async function azureRequest(wav: Buffer, pronunciationParams?: Record<string, string>): Promise<AzureResponse> {
+async function azureRequest(wav: Buffer, lang: Lang, pronunciationParams?: Record<string, string>): Promise<AzureResponse> {
   const azure = config.azure!;
-  const url = `https://${azure.region}.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1?language=ru-RU&format=detailed`;
+  const url = `https://${azure.region}.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1?language=${COURSES[lang].locale}&format=detailed`;
   const headers: Record<string, string> = {
     "Ocp-Apim-Subscription-Key": azure.key,
     "Content-Type": "audio/wav; codecs=audio/pcm; samplerate=16000",
@@ -118,24 +121,24 @@ async function recognizeAzure(wav: Buffer, options: RecognizeOptions): Promise<R
   }
   if (options.referenceText && duration <= AZURE_ASSESS_MAX_SEC) {
     // Scripted: miscue detection marks skipped and extra words against the target.
-    const data = await azureRequest(wav, assessmentParams(options.referenceText, true));
+    const data = await azureRequest(wav, options.lang, assessmentParams(options.referenceText, true));
     const best = data.NBest?.[0];
     return { text: best?.Display ?? data.DisplayText ?? "", lexical: best?.Lexical, pronunciation: parsePronunciation(best) };
   }
 
-  const data = await azureRequest(wav);
+  const data = await azureRequest(wav, options.lang);
   const best = data.NBest?.[0];
   return { text: best?.Display ?? data.DisplayText ?? "", lexical: best?.Lexical };
 }
 
 // --- OpenAI (fallback: transcript only, no pronunciation scores) ---
 
-async function transcribeOpenAI(wav: Buffer): Promise<string> {
+async function transcribeOpenAI(wav: Buffer, lang: Lang): Promise<string> {
   const openai = config.openai!;
   const form = new FormData();
   form.append("file", new Blob([new Uint8Array(wav)], { type: "audio/wav" }), "speech.wav");
   form.append("model", openai.sttModel);
-  form.append("language", "ru");
+  form.append("language", lang);
   form.append("response_format", "json");
   const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
     method: "POST",

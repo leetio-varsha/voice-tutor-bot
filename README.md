@@ -1,8 +1,19 @@
 # MathiasSpeach
 
-Telegram voice tutor for spoken Russian. POC.
+Telegram voice tutor for spoken Russian, and for spoken English for Russian speakers. POC.
 
 The learner listens to a natural-sounding voice, answers with a voice message, and gets a spoken reply plus a short correction. Pronunciation is scored per word by an acoustic assessor, not guessed from a transcript: speech-to-text tends to "hear" the correct word even when it was mispronounced.
+
+## Courses
+
+Each learner picks a course on their first /start; the interface language follows from it:
+
+| Course | Practice language | Interface, explanations, translations | Speech locale |
+| --- | --- | --- | --- |
+| `ru` | Russian | English | ru-RU |
+| `en` | American English | Russian | en-US |
+
+Everything that differs per course (tutor prompt priorities, hard sounds, spelling traps, locale) is in `src/courses.ts`; interface text is in `src/i18n.ts`. Learners from before courses existed are on `ru`. The owner can fix a wrong pick with `/course <userId> ru|en`.
 
 ## UI
 
@@ -21,7 +32,8 @@ Buttons on tutor voice messages: 🐢 Slower (re-plays at 0.8x), 💡 Help me an
 
 Owner-only commands (`OWNER_USER_ID`, default the first allowed user), hidden from the menu:
 
-- `/voices`: blind test with the same phrase in every configured TTS voice. `/voice <elevenlabs|azure|openai>` switches the voice.
+- `/voices [ru|en]`: blind test with the same phrase in every configured TTS voice (Russian by default). `/voice <elevenlabs|azure|openai>` switches the voice provider; each provider has its own voice per language.
+- `/course <userId> ru|en`: change a learner's course. Tutor notes stay as they were.
 - `/schedule [userId times timezone | userId on|off]`: view or set a learner's reminders.
 - `/stats`: sessions per learner in the last 7 days.
 - `/notes [userId]`: the tutor's private notes about a learner.
@@ -50,7 +62,7 @@ In-process, every minute:
 ```
 Telegram voice (OGG/Opus)
   -> ffmpeg -> 16 kHz mono WAV
-  -> Azure STT (ru-RU) -> text
+  -> Azure STT (ru-RU or en-US, per course) -> text
   -> in parallel: Claude (reply + correction + new words)  |  Azure clarity check (<= 30 s)
   -> feedback text, then TTS (Azure / ElevenLabs / OpenAI) -> ffmpeg -> OGG/Opus voice message
 ```
@@ -65,7 +77,7 @@ Requirements: Node 22+, Docker (for Postgres). ffmpeg comes from `ffmpeg-static`
 npm install
 docker run -d --name mathias-pg -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=mathias -p 55432:5432 postgres:17-alpine
 cp .env.example .env   # fill in keys; never commit .env
-npm run smoke:azure    # speech-to-text + pronunciation check, no Telegram needed
+npm run smoke:azure    # speech-to-text + pronunciation check, no Telegram needed; `npm run smoke:azure -- en` for English
 npm run smoke:tts      # renders out/voice-<provider>.ogg for each configured voice
 npm run dev            # long polling, restarts on file changes; the schema is created on start
 ```
@@ -88,6 +100,7 @@ railway logs --service bot --lines 100
 
 ## Known POC limits
 
-- The voice switch is global, not per learner.
+- The voice provider switch is global, not per learner (the voice itself follows the learner's course).
+- Speech recognition listens in the practice language only. A voice message in the learner's own language comes out garbled; typed text in either language works.
 - Azure short-audio REST caps: 60 s per voice message, 30 s for pronunciation scoring.
 - For ru-RU, Azure gives no word-stress/prosody scoring and no phoneme names, only per-word and per-phoneme scores.

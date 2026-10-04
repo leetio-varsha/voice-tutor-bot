@@ -1,3 +1,4 @@
+import { COURSES } from "./courses.js";
 import { clearLessonState, getSession, hasSession, type Session } from "./session.js";
 import * as store from "./store.js";
 import type { Learner, LessonMode } from "./store.js";
@@ -7,9 +8,11 @@ import * as tutor from "./tutor.js";
 export const IDLE_MINUTES = 60;
 const RECENT_WORDS_FOR_CONTEXT = 20;
 
+/** Only for learners who have picked a course (every handler and the notes job guarantee that). */
 export async function learnerContext(learner: Learner): Promise<tutor.LearnerContext> {
-  const { words } = await store.latestWords(learner.id, RECENT_WORDS_FOR_CONTEXT);
-  return { name: learner.firstName, notes: learner.tutorNotes, recentWords: words.map((w) => w.ru) };
+  const course = COURSES[learner.learning ?? "ru"];
+  const { words } = await store.latestWords(learner.id, course.target, RECENT_WORDS_FOR_CONTEXT);
+  return { course, name: learner.firstName, notes: learner.tutorNotes, recentWords: words.map((w) => w[course.target]) };
 }
 
 /** Closes whatever lesson is open and starts a new one. */
@@ -87,9 +90,9 @@ export async function processPendingNotes(): Promise<void> {
       }
       try {
         const updated = await tutor.updateNotes(await learnerContext(learner), { mode: info.mode, scenario: info.scenario, turns, drills });
-        await store.saveTutorNotes(learnerId, updated.notes, updated.next_focus_en);
+        await store.saveTutorNotes(learnerId, updated.notes, updated.next_focus_native);
         learner.tutorNotes = updated.notes;
-        learner.nextFocus = updated.next_focus_en;
+        learner.nextFocus = updated.next_focus_native;
         await store.markNotesUpdated(id);
         console.log(`[notes] updated for learner ${learnerId} from lesson ${id}`);
       } catch (err) {
