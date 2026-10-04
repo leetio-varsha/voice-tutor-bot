@@ -1,14 +1,16 @@
 import { Composer, InlineKeyboard } from "grammy";
 import { isValidTimezone } from "../config.js";
 import { onButton, type BotContext } from "../context.js";
+import { COURSES, type Lang } from "../courses.js";
+import { finishCurrentLesson } from "../lessons.js";
 import * as store from "../store.js";
 import type { Learner } from "../store.js";
 import { localNow } from "../time.js";
 import * as tutor from "../tutor.js";
-import { menuLabels, type UiText } from "../i18n.js";
-import { esc } from "../ui.js";
+import { COURSE_PICKER, menuLabels, UI, type UiText } from "../i18n.js";
+import { esc, mainMenu } from "../ui.js";
 
-/** Reminder times and timezone, all through buttons; the settings message is edited in place. */
+/** Reminder times, timezone and course, all through buttons; the settings message is edited in place. */
 export const settings = new Composer<BotContext>();
 
 const MAX_LESSON_TIMES = 4;
@@ -45,6 +47,7 @@ function settingsView(learner: Learner, t: UiText) {
   for (const time of learner.lessonTimes) keyboard.text(`✖ ${time}`, `set:del:${time}`);
   if (learner.lessonTimes.length < MAX_LESSON_TIMES) keyboard.text(t.addTime, "set:add");
   keyboard.row().text(t.changeTimezone, "set:tz");
+  keyboard.row().text(t.changeCourse, "set:course");
   return { text, keyboard };
 }
 
@@ -120,6 +123,32 @@ onButton(settings, /^set:tz:(.+)$/, async (ctx) => {
 onButton(settings, "set:city", async (ctx) => {
   ctx.session.awaiting = "city";
   await ctx.reply(ctx.t.typeCityPrompt);
+});
+
+// Changing course is two taps (open the picker, then choose), so a stray tap can't switch it.
+onButton(settings, "set:course", async (ctx) => {
+  const keyboard = new InlineKeyboard();
+  for (const lang of ["ru", "en"] as const) {
+    keyboard.text(`${lang === ctx.course.target ? "✅ " : ""}${COURSE_PICKER[lang]}`, `set:course:${lang}`).row();
+  }
+  keyboard.text(ctx.t.back, "set:back");
+  await ctx.editMessageText(`<b>${esc(COURSE_PICKER.question)}</b>\n\n${esc(ctx.t.courseSwitchNote)}`, { parse_mode: "HTML", reply_markup: keyboard });
+});
+
+onButton(settings, /^set:course:(ru|en)$/, async (ctx) => {
+  const lang = ctx.match[1] as Lang;
+  const switched = lang !== ctx.course.target;
+  if (switched) {
+    // The open lesson is in the old language; close it before the tutor switches.
+    await finishCurrentLesson(ctx.session, ctx.learner.id);
+    await store.setLearning(ctx.learner.id, lang);
+    ctx.learner.learning = lang;
+    ctx.course = COURSES[lang];
+    ctx.t = UI[ctx.course.native];
+  }
+  await redraw(ctx);
+  // The menu under the input field only changes with a new message.
+  if (switched) await ctx.reply(ctx.t.welcome.join("\n"), { reply_markup: mainMenu(ctx.t) });
 });
 
 onButton(settings, "set:back", redraw);

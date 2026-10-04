@@ -13,7 +13,7 @@ Each learner picks a course on their first /start; the interface language follow
 | `ru` | Russian | English | ru-RU |
 | `en` | American English | Russian | en-US |
 
-Everything that differs per course (tutor prompt priorities, hard sounds, spelling traps, locale) is in `src/courses.ts`; interface text is in `src/i18n.ts`. Learners from before courses existed are on `ru`. The owner can fix a wrong pick with `/course <userId> ru|en`.
+Everything that differs per course (tutor prompt priorities, hard sounds, spelling traps, locale) is in `src/courses.ts`; interface text is in `src/i18n.ts`. Learners from before courses existed are on `ru`. A learner can switch in ⚙️ Settings (🌐, then pick; the open lesson ends, words and tutor notes stay), and the owner can with `/course <userId> ru|en`.
 
 ## UI
 
@@ -26,7 +26,7 @@ The learner never types commands. A persistent keyboard under the input field ho
 | ✍️ Dictation | Listen, type what you heard, get spelling feedback |
 | 📚 My words | Saved words: 🔊 per word or all at once, ✏️ Edit to remove, ➕ Add word (typed or spoken, Russian or English) |
 | 📈 Progress | Streak, today's sessions vs goal, last 7 days (sessions, minutes, spoken replies, drill scores, words), next focus |
-| ⚙️ Settings | Reminders on/off, reminder times (hour and minute pickers), timezone (common cities or type your own) |
+| ⚙️ Settings | Reminders on/off, reminder times (hour and minute pickers), timezone (common cities or type your own), course (🌐) |
 
 Buttons on tutor voice messages: 🐢 Slower (re-plays at 0.8x), 💡 Help me answer (two voiced suggestions), ➡️ Next, ⏹ Finish. The Russian text and English translation sit under spoilers, so you listen first. A voice or text message outside a drill starts a free conversation.
 
