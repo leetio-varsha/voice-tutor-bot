@@ -7,12 +7,26 @@ import * as tutor from "./tutor.js";
 /** A lesson with no activity for this long is closed; a restart within it resumes the conversation. */
 export const IDLE_MINUTES = 60;
 const RECENT_WORDS_FOR_CONTEXT = 20;
+/** Last-rung words the tutor steers one role-play toward. */
+const AMBUSH_WORDS = 3;
 
 /** Only for learners who have picked a course (every handler and the notes job guarantee that). */
 export async function learnerContext(learner: Learner): Promise<tutor.LearnerContext> {
   const course = COURSES[learner.learning ?? "ru"];
-  const { words } = await store.latestWords(learner.id, course.target, RECENT_WORDS_FOR_CONTEXT);
-  return { course, name: learner.firstName, notes: learner.tutorNotes, recentWords: words.map((w) => w[course.target]) };
+  const [{ words }, ambush] = await Promise.all([
+    store.latestWords(learner.id, course.target, RECENT_WORDS_FOR_CONTEXT),
+    store.ambushWords(learner.id, course.target, AMBUSH_WORDS),
+  ]);
+  const hidden = ambush.map((w) => w[course.target]);
+  return {
+    course,
+    name: learner.firstName,
+    level: learner.levels[course.target] ?? null,
+    notes: learner.tutorNotes,
+    // The tutor recycles recent words by saying them, which would give the hidden ones away.
+    recentWords: words.map((w) => w[course.target]).filter((word) => !hidden.includes(word)),
+    ambush: hidden,
+  };
 }
 
 /** Closes whatever lesson is open and starts a new one. */
@@ -33,7 +47,7 @@ export async function startLesson(
 }
 
 /** Drills continue the current drill lesson ("Next" is the same session); switching modes starts a new one. */
-export async function ensureDrillLesson(session: Session, learner: Learner, mode: "repeat" | "dictation"): Promise<number> {
+export async function ensureDrillLesson(session: Session, learner: Learner, mode: "repeat" | "dictation" | "vocab"): Promise<number> {
   if (session.mode === mode && session.lessonId !== undefined) return session.lessonId;
   const lessonId = await startLesson(session, learner, mode, null, null);
   if (session.usedTargets.length === 0) session.usedTargets = await store.recentDrillTargets(learner.id, 50);

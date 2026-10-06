@@ -26,6 +26,7 @@ export async function progressReport(learner: Learner, t: UiText, heading: strin
   const streak = streakDays(stats.activeDays, today);
   const goal = learner.lessonTimes.length || 2;
 
+  const ladder = await store.ladderStats(learner.id, learner.learning ?? "ru");
   const { pronThisWeek, pronLastWeek } = stats;
   const pronunciation =
     pronThisWeek === null
@@ -44,6 +45,7 @@ export async function progressReport(learner: Learner, t: UiText, heading: strin
     t.drills(stats.drills) + pronunciation,
     t.words(stats.wordsTotal, stats.wordsThisWeek),
   ];
+  if (ladder.active + ladder.learned > 0) lines.push(`• ${t.ladder(ladder.active, ladder.due, ladder.learned)}`);
   if (learner.nextFocus) lines.push("", `${esc(t.nextFocus)}: ${esc(learner.nextFocus)}`);
   return lines.join("\n");
 }

@@ -6,7 +6,7 @@ import { closeIdleLessons } from "./lessons.js";
 import * as store from "./store.js";
 import type { Learner } from "./store.js";
 import { isoWeekKey, localNow, timeToMinutes } from "./time.js";
-import { TOPICS } from "./ui.js";
+import { randomTopic } from "./topics.js";
 
 const TICK_MS = 60_000;
 /** A reminder goes out within this many minutes after its slot; later (e.g. after downtime) it's skipped. */
@@ -31,8 +31,7 @@ async function sendReminders(api: Api, learner: Learner, t: UiText): Promise<voi
 
     const stats = await store.progressStats(learner.id, learner.timezone, now.date);
     const streak = streakDays(stats.activeDays, now.date);
-    const topics = TOPICS.filter((t) => t.scenario);
-    const topic = topics[Math.floor(Math.random() * topics.length)]!;
+    const topic = randomTopic();
     const label = t.topics[topic.id];
     const text = [t.reminder(learner.firstName), streak > 0 ? t.reminderStreak(streak) : "", t.howAbout(label)].filter(Boolean).join("\n");
     const keyboard = new InlineKeyboard()
@@ -41,6 +40,8 @@ async function sendReminders(api: Api, learner: Learner, t: UiText): Promise<voi
       .row()
       .text(t.otherTopic, "menu:talk")
       .text(t.quickDrill, "repeat:next");
+    const { due } = await store.ladderStats(learner.id, learner.learning ?? "ru");
+    if (due) keyboard.row().text(t.vocabReview(due), "vocab:start");
     await api.sendMessage(learner.id, text, { reply_markup: keyboard });
     console.log(`[scheduler] sent ${slot} reminder to ${learner.id}`);
   }

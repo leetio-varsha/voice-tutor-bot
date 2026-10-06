@@ -1,5 +1,5 @@
 import { config } from "./config.js";
-import type { Lang } from "./courses.js";
+import type { Lang, Level } from "./courses.js";
 import { pool } from "./db.js";
 
 // --- learners ---
@@ -14,6 +14,8 @@ export interface Learner {
   nextFocus: string;
   /** The language they study; null until they pick it on /start. */
   learning: Lang | null;
+  /** Difficulty set by the learner, per course; no entry means the tutor decides. */
+  levels: Partial<Record<Lang, Level>>;
 }
 
 interface LearnerRow {
@@ -25,6 +27,7 @@ interface LearnerRow {
   tutor_notes: string;
   next_focus: string;
   learning: Lang | null;
+  levels: Partial<Record<Lang, Level>>;
 }
 
 const toLearner = (row: LearnerRow): Learner => ({
@@ -36,6 +39,7 @@ const toLearner = (row: LearnerRow): Learner => ({
   tutorNotes: row.tutor_notes,
   nextFocus: row.next_focus,
   learning: row.learning,
+  levels: row.levels,
 });
 
 export async function ensureLearner(telegramId: number, firstName: string): Promise<Learner> {
@@ -62,6 +66,15 @@ export async function setLearning(learnerId: number, learning: Lang): Promise<vo
   await pool.query(`UPDATE learners SET learning = $2 WHERE telegram_id = $1`, [learnerId, learning]);
 }
 
+/** Sets the difficulty for one course; null hands the choice back to the tutor. */
+export async function setLevel(learnerId: number, course: Lang, level: Level | null): Promise<void> {
+  await pool.query(
+    `UPDATE learners SET levels = CASE WHEN $3::text IS NULL THEN levels - $2::text ELSE levels || jsonb_build_object($2::text, $3::text) END
+     WHERE telegram_id = $1`,
+    [learnerId, course, level],
+  );
+}
+
 export async function saveSchedule(learnerId: number, lessonTimes: string[], timezone: string, remindersEnabled: boolean): Promise<void> {
   await pool.query(`UPDATE learners SET lesson_times = $2, timezone = $3, reminders_enabled = $4 WHERE telegram_id = $1`, [
     learnerId,
@@ -73,7 +86,7 @@ export async function saveSchedule(learnerId: number, lessonTimes: string[], tim
 
 // --- lessons ---
 
-export type LessonMode = "talk" | "repeat" | "dictation";
+export type LessonMode = "talk" | "repeat" | "dictation" | "vocab";
 
 export async function openLesson(learnerId: number, mode: LessonMode, scenario: string | null, openingLine: string | null): Promise<number> {
   const { rows } = await pool.query<{ id: number }>(
@@ -117,6 +130,17 @@ export async function recentOpenLesson(learnerId: number, withinMinutes: number)
   );
   const row = rows[0];
   return row && { id: row.id, mode: row.mode, scenario: row.scenario, openingLine: row.opening_line };
+}
+
+/** Scenarios of the learner's latest role-plays, newest first, so the next one can differ. */
+export async function recentScenarios(learnerId: number, limit: number): Promise<string[]> {
+  const { rows } = await pool.query<{ scenario: string }>(
+    `SELECT scenario FROM lessons
+     WHERE learner_id = $1 AND mode = 'talk' AND scenario IS NOT NULL AND opening_line IS NOT NULL
+     ORDER BY id DESC LIMIT $2`,
+    [learnerId, limit],
+  );
+  return rows.map((row) => row.scenario);
 }
 
 export async function lessonsNeedingNotes(limit: number): Promise<{ id: number; learnerId: number }[]> {
@@ -176,7 +200,7 @@ export async function lessonTurns(lessonId: number): Promise<TurnRecord[]> {
 }
 
 export interface DrillRecord {
-  kind: "repeat" | "dictation";
+  kind: "repeat" | "dictation" | "vocab";
   target: string;
   answer: string;
   score: number | null;
@@ -273,6 +297,144 @@ export async function latestWords(learnerId: number, learning: Lang, limit: numb
 export async function lessonWords(lessonId: number): Promise<Word[]> {
   const { rows } = await pool.query<Word>(`SELECT id, ru, en FROM words WHERE lesson_id = $1 ORDER BY id`, [lessonId]);
   return rows;
+}
+
+// --- word ladder ---
+
+/** Stages 0-3 are recall drills; at `ambush` a word waits to be used unprompted in conversation. */
+export const LADDER = { ambush: 4, learned: 5 } as const;
+
+export interface LadderWord extends Word {
+  stage: number;
+  /** The learner's own wording that showed the gap; null for a word they added by hand. */
+  said: string | null;
+  /** Their full line at that moment, which `said` is a part of. */
+  moment: string | null;
+  /** Telegram file id of the word's picture, and what the picture shows. */
+  imageFileId: string | null;
+  imageScene: string | null;
+}
+
+/**
+ * Puts vocabulary gaps on the ladder, due right away. A word that is already there slips back one rung:
+ * the learner has just talked around it again.
+ */
+export async function addGapWords(
+  learnerId: number,
+  learning: Lang,
+  lessonId: number,
+  moment: string | null,
+  gaps: { said: string; ru: string; en: string }[],
+): Promise<number[]> {
+  const ids: number[] = [];
+  for (const gap of gaps) {
+    const { rows } = await pool.query<{ id: number }>(
+      `INSERT INTO words (learner_id, learning, ru, en, source, lesson_id, said, moment, stage, due_at)
+       VALUES ($1, $2, $3, $4, 'gap', $5, $6, $7, 0, now())
+       ON CONFLICT (learner_id, learning, lower(CASE learning WHEN 'en' THEN en ELSE ru END)) DO UPDATE
+         SET said = EXCLUDED.said, moment = EXCLUDED.moment, lesson_id = EXCLUDED.lesson_id,
+             stage = GREATEST(coalesce(words.stage, 1) - 1, 0), due_at = now()
+       RETURNING id`,
+      [learnerId, learning, gap.ru.trim(), gap.en.trim(), lessonId, gap.said.trim(), moment],
+    );
+    ids.push(rows[0]!.id);
+  }
+  return ids;
+}
+
+export async function gapWordsSince(learnerId: number, learning: Lang, hours: number): Promise<number> {
+  const { rows } = await pool.query<{ count: number }>(
+    `SELECT count(*)::int AS count FROM words
+     WHERE learner_id = $1 AND learning = $2 AND source = 'gap' AND created_at > now() - make_interval(hours => $3)`,
+    [learnerId, learning, hours],
+  );
+  return rows[0]!.count;
+}
+
+/** A word the learner added by hand starts at the first new-situation rung; it has no line of their own to return to. */
+export async function startLadder(learnerId: number, wordId: number, dueInHours: number): Promise<void> {
+  await pool.query(`UPDATE words SET stage = 1, due_at = now() + make_interval(hours => $3) WHERE learner_id = $1 AND id = $2 AND stage IS NULL`, [
+    learnerId,
+    wordId,
+    dueInHours,
+  ]);
+}
+
+const LADDER_COLUMNS = `id, ru, en, stage, said, moment, image_file_id AS "imageFileId", image_scene AS "imageScene"`;
+
+export async function dueLadderWords(learnerId: number, learning: Lang, limit: number): Promise<LadderWord[]> {
+  const { rows } = await pool.query<LadderWord>(
+    `SELECT ${LADDER_COLUMNS} FROM words
+     WHERE learner_id = $1 AND learning = $2 AND stage < ${LADDER.ambush} AND due_at <= now()
+     ORDER BY due_at, id LIMIT $3`,
+    [learnerId, learning, limit],
+  );
+  return rows;
+}
+
+/** Words on the last rung that are due: the tutor steers a role-play toward them without saying them. */
+export async function ambushWords(learnerId: number, learning: Lang, limit: number): Promise<LadderWord[]> {
+  const { rows } = await pool.query<LadderWord>(
+    `SELECT ${LADDER_COLUMNS} FROM words
+     WHERE learner_id = $1 AND learning = $2 AND stage = ${LADDER.ambush} AND due_at <= now()
+     ORDER BY due_at, id LIMIT $3`,
+    [learnerId, learning, limit],
+  );
+  return rows;
+}
+
+export async function findLadderWord(learnerId: number, wordId: number): Promise<LadderWord | undefined> {
+  const { rows } = await pool.query<LadderWord>(`SELECT ${LADDER_COLUMNS} FROM words WHERE learner_id = $1 AND id = $2 AND stage IS NOT NULL`, [
+    learnerId,
+    wordId,
+  ]);
+  return rows[0];
+}
+
+export async function moveOnLadder(learnerId: number, wordId: number, stage: number, dueInHours: number): Promise<void> {
+  await pool.query(`UPDATE words SET stage = $3, due_at = now() + make_interval(hours => $4) WHERE learner_id = $1 AND id = $2`, [
+    learnerId,
+    wordId,
+    stage,
+    dueInHours,
+  ]);
+}
+
+/** Marks last-rung words as learned by their learned-side spelling; returns the ones that were. */
+export async function markLearned(learnerId: number, learning: Lang, terms: string[]): Promise<Word[]> {
+  const { rows } = await pool.query<Word>(
+    `UPDATE words SET stage = ${LADDER.learned}, due_at = NULL
+     WHERE learner_id = $1 AND learning = $2 AND stage = ${LADDER.ambush}
+       AND lower(CASE learning WHEN 'en' THEN en ELSE ru END) = ANY($3::text[])
+     RETURNING id, ru, en`,
+    [learnerId, learning, terms.map((term) => term.trim().toLowerCase())],
+  );
+  return rows;
+}
+
+export async function ladderStats(learnerId: number, learning: Lang): Promise<{ active: number; due: number; learned: number }> {
+  const { rows } = await pool.query<{ active: number; due: number; learned: number }>(
+    `SELECT count(*) FILTER (WHERE stage < ${LADDER.learned})::int AS active,
+            count(*) FILTER (WHERE stage < ${LADDER.ambush} AND due_at <= now())::int AS due,
+            count(*) FILTER (WHERE stage = ${LADDER.learned})::int AS learned
+     FROM words WHERE learner_id = $1 AND learning = $2 AND stage IS NOT NULL`,
+    [learnerId, learning],
+  );
+  return rows[0]!;
+}
+
+/** Takes one picture from the learner's daily allowance; false when it is used up. */
+export async function claimPicture(learnerId: number, perDay: number): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    `INSERT INTO picture_log (learner_id)
+     SELECT $1 WHERE (SELECT count(*) FROM picture_log WHERE learner_id = $1 AND created_at > now() - interval '24 hours') < $2`,
+    [learnerId, perDay],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+export async function saveWordPicture(learnerId: number, wordId: number, fileId: string, scene: string): Promise<void> {
+  await pool.query(`UPDATE words SET image_file_id = $3, image_scene = $4 WHERE learner_id = $1 AND id = $2`, [learnerId, wordId, fileId, scene]);
 }
 
 // --- notifications ---

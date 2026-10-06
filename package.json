@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "smoke:tts": "tsx scripts/smoke-tts.ts",
     "smoke:azure": "tsx scripts/smoke-azure.ts",
+    "smoke:image": "tsx scripts/smoke-image.ts",
     "voices:elevenlabs": "tsx scripts/list-elevenlabs-voices.ts"
   },
   "dependencies": {

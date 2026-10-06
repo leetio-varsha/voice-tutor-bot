@@ -1,7 +1,7 @@
-import type { Lang } from "./courses.js";
+import type { Lang, Level } from "./courses.js";
+import type { TopicCategory, TopicId } from "./topics.js";
 
-export type MenuKey = "talk" | "repeat" | "dictation" | "words" | "progress" | "settings";
-export type TopicId = "cafe" | "taxi" | "market" | "neighbour" | "work" | "pharmacy" | "day" | "random";
+export type MenuKey = "talk" | "vocab" | "repeat" | "dictation" | "words" | "progress" | "settings";
 
 const pluralRules: Record<Lang, Intl.PluralRules> = { en: new Intl.PluralRules("en"), ru: new Intl.PluralRules("ru") };
 
@@ -15,7 +15,11 @@ export interface UiText {
   menu: Record<MenuKey, string>;
   micPlaceholder: string;
   welcome: string[];
+  topicCategories: Record<TopicCategory, string>;
   topics: Record<TopicId, string>;
+  surpriseMe: string;
+  ownTopic: string;
+  ownTopicPrompt: string;
 
   slower: string;
   helpMeAnswer: string;
@@ -32,6 +36,9 @@ export interface UiText {
   typeCityName: string;
   dictationNeedsTyping: string;
   useMenu: string;
+  thinking: string;
+  stillWorking: string;
+  stillWorkingButton: string;
   somethingWentWrong: string;
 
   repeatPrompt: string;
@@ -41,6 +48,35 @@ export interface UiText {
   dictationPrompt: string;
   perfect: string;
   correct: string;
+
+  upgrade: string;
+  usedUnprompted: string;
+  hint: string;
+  skip: string;
+  vocabNothingDue: string;
+  ladder: (active: number, due: number, learned: number) => string;
+  vocabReview: (count: number) => string;
+  vocabAnchorIntro: string;
+  vocabAnchorAsk: (said: string) => string;
+  vocabSituationAsk: string;
+  vocabContrastAsk: string;
+  vocabStoryAsk: (meaning: string) => string;
+  vocabPictureAsk: string;
+  ownPicture: string;
+  ownPicturePrompt: string;
+  drawing: string;
+  pictureLimit: string;
+  pictureFailed: string;
+  vocabHintSaid: (said: string) => string;
+  vocabHintMeaning: (meaning: string) => string;
+  vocabHintLetters: (mask: string) => string;
+  vocabNoMoreHints: string;
+  vocabMissed: string;
+  vocabGoesWith: string;
+  vocabNextIn: (days: number) => string;
+  vocabAmbushNext: string;
+  vocabHold: string;
+  vocabSummary: (passed: number, total: number) => string;
 
   yourWords: string;
   yourLatestWords: (shown: number, total: number) => string;
@@ -84,6 +120,11 @@ export interface UiText {
   /** Settings button; carries a hint in the other language in case the course was picked by mistake. */
   changeCourse: string;
   courseSwitchNote: string;
+  level: (label: string) => string;
+  changeLevel: string;
+  levelTitle: string;
+  levelNote: string;
+  levels: Record<Level | "auto", string>;
   addReminder: string;
   pickHour: string;
   pickTime: string;
@@ -107,6 +148,7 @@ export const UI: Record<Lang, UiText> = {
   en: {
     menu: {
       talk: "🗣 Talk",
+      vocab: "💎 Precise word",
       repeat: "🎧 Repeat after me",
       dictation: "✍️ Dictation",
       words: "📚 My words",
@@ -118,23 +160,80 @@ export const UI: Record<Lang, UiText> = {
       "Привет! I'm your Russian speaking coach.",
       "",
       "🗣 Talk: a role-play conversation, voice in and voice out",
+      "💎 Precise word: recall the words you talked around in conversation",
       "🎧 Repeat after me: say a phrase and get a pronunciation score",
       "✍️ Dictation: listen and type what you hear",
       "📈 Progress: your streak and how you're improving",
-      "⚙️ Settings: reminder times and timezone",
+      "⚙️ Settings: difficulty level, reminder times and timezone",
       "",
       "Or just hold the mic and say something in Russian.",
     ],
+    topicCategories: {
+      everyday: "🏙 Everyday",
+      travel: "✈️ Travel",
+      work: "💼 Work",
+      people: "👋 Friends",
+      problems: "🧯 Problems",
+      opinions: "💭 Opinions",
+    },
     topics: {
       cafe: "☕ Café",
-      taxi: "🚕 Taxi",
+      restaurant: "🍽 Restaurant",
       market: "🛒 Market",
-      neighbour: "🏠 Neighbour",
-      work: "💼 Work call",
+      taxi: "🚕 Taxi",
       pharmacy: "💊 Pharmacy",
+      neighbour: "🏠 Neighbour",
+      haircut: "💇 Haircut",
+      delivery: "📦 Delivery",
+
+      airport: "✈️ Airport",
+      hotel: "🏨 Hotel",
+      directions: "🧭 Directions",
+      train: "🚆 Train tickets",
+      flat: "🔑 Renting a flat",
+      car: "🚗 Car rental",
+      border: "🛂 Border control",
+      local: "🗺 Local tips",
+
+      work: "💼 Work call",
+      standup: "📋 Stand-up",
+      interview: "🎤 Job interview",
+      myjob: "🧩 Explain my job",
+      feedback: "💬 Feedback",
+      negotiation: "🤝 Negotiation",
+      smalltalk: "🫖 Office small talk",
+      disagree: "🙅 Disagreeing",
+
       day: "🗓 My day",
-      random: "🎲 Surprise me",
+      party: "🎉 Party",
+      plans: "📅 Weekend plans",
+      movies: "🎬 Movies & shows",
+      hobby: "🎸 Hobbies",
+      story: "📖 Tell a story",
+      advice: "🫶 Giving advice",
+      oldfriend: "👋 Old friend",
+
+      doctor: "🩺 Doctor",
+      bank: "🏦 Bank",
+      refund: "🧾 Refund",
+      repair: "🔧 Repairs",
+      support: "🎧 Tech support",
+      noise: "🔊 Noisy neighbour",
+      lost: "🔍 Lost item",
+      bill: "🧮 Wrong bill",
+
+      debate: "⚖️ Debate",
+      tech: "🤖 Tech & AI",
+      culture: "🌍 Cultures",
+      dilemma: "🧠 Dilemma",
+      money: "💸 Money",
+      future: "🔮 Plans & dreams",
+      trip: "🏝 Best & worst trip",
+      habits: "🌅 Habits",
     },
+    surpriseMe: "🎲 Surprise me",
+    ownTopic: "✍️ My topic",
+    ownTopicPrompt: "What do you want to talk about? A situation, a person, anything. Type it in English or Russian, or say it in Russian.",
 
     slower: "🐢 Slower",
     helpMeAnswer: "💡 Help me answer",
@@ -151,6 +250,9 @@ export const UI: Record<Lang, UiText> = {
     typeCityName: "Please type the city name.",
     dictationNeedsTyping: "For dictation, type the sentence you heard.",
     useMenu: "Use the menu below.",
+    thinking: "⏳ Working on your answer…",
+    stillWorking: "⏳ I'm still answering your previous message, so I'll skip this one. Wait for the reply, then send it again if you still need to.",
+    stillWorkingButton: "⏳ One moment, I'm still working on the answer",
     somethingWentWrong: "Sorry, something went wrong",
 
     repeatPrompt: "Listen, then hold the mic and say it.",
@@ -162,6 +264,35 @@ export const UI: Record<Lang, UiText> = {
     dictationPrompt: "Type what you hear.",
     perfect: "Perfect!",
     correct: "Correct",
+
+    upgrade: "💎 More precise",
+    usedUnprompted: "🏆 You used it on your own, so it's learned",
+    hint: "💡 Hint",
+    skip: "➡️ Skip",
+    vocabNothingDue: "Nothing to recall right now. Words get here from 🗣 Talk: when you describe something instead of naming it, I catch the precise word (💎).",
+    ladder: (active, due, learned) => `Word ladder: ${active} in progress, ${due} due, ${learned} learned`,
+    vocabReview: (count) => `💎 Recall words (${count})`,
+    vocabAnchorIntro: "In the conversation you said:",
+    vocabAnchorAsk: (said) => `Say it again, with the precise word in place of "${said}".`,
+    vocabSituationAsk: "Listen and answer in one sentence. One precise word belongs here.",
+    vocabContrastAsk: "Two situations, two words. Say one sentence about each, with the word that fits.",
+    vocabStoryAsk: (meaning) => `Tell me, in two sentences, about a real moment from your life that calls for the word meaning: ${meaning}`,
+    vocabPictureAsk: "What's going on in the picture? Answer in one sentence, with the precise word.",
+    ownPicture: "🎨 My own picture",
+    ownPicturePrompt: "Describe the picture this word brings to your mind: who is in it and what is happening. Type it in English or Russian, or say it in Russian.",
+    drawing: "🎨 Drawing it. It takes up to a minute, I'll send it when it's ready.",
+    pictureLimit: "That's the picture limit for today. Try again tomorrow.",
+    pictureFailed: "I couldn't draw that one. Try describing it differently.",
+    vocabHintSaid: (said) => `Back then you said: ${said}`,
+    vocabHintMeaning: (meaning) => `It means: ${meaning}`,
+    vocabHintLetters: (mask) => `First letters: ${mask}`,
+    vocabNoMoreHints: "No more hints. Give it a try, or tap Skip.",
+    vocabMissed: "The word was",
+    vocabGoesWith: "Goes with",
+    vocabNextIn: (days) => `It comes back in ${days} ${plural("en", days, { one: "day", other: "days" })}, as a different task.`,
+    vocabAmbushNext: "Last step: use it on your own in a conversation. I won't remind you.",
+    vocabHold: "That counts, but with the first letters shown: it comes back tomorrow.",
+    vocabSummary: (passed, total) => `Done: ${passed} of ${total}.`,
 
     yourWords: "Your words:",
     yourLatestWords: (shown, total) => `Your words (latest ${shown} of ${total}):`,
@@ -204,6 +335,17 @@ export const UI: Record<Lang, UiText> = {
     changeTimezone: "🌍 Change timezone",
     changeCourse: "🌐 Learning Russian · Сменить язык",
     courseSwitchNote: "Switching ends the current lesson. Your words and tutor notes are kept.\nТекущий урок закончится, слова и заметки тьютора сохранятся.",
+    level: (label) => `🎚 Level: ${label}`,
+    changeLevel: "🎚 Change level",
+    levelTitle: "🎚 Difficulty level",
+    levelNote: "Sets how I speak, how tricky the situations get and how picky my corrections are. It applies from the next lesson or drill.",
+    levels: {
+      auto: "🤖 Auto (tutor decides)",
+      beginner: "🌱 Beginner (A1-A2)",
+      intermediate: "🌿 Intermediate (B1)",
+      upper: "🌳 Upper-intermediate (B2)",
+      advanced: "🏔 Advanced (C1)",
+    },
     addReminder: "⏰ Add a reminder",
     pickHour: "Pick the hour:",
     pickTime: "Pick the time:",
@@ -237,6 +379,7 @@ export const UI: Record<Lang, UiText> = {
   ru: {
     menu: {
       talk: "🗣 Разговор",
+      vocab: "💎 Точное слово",
       repeat: "🎧 Повторяй за мной",
       dictation: "✍️ Диктант",
       words: "📚 Мои слова",
@@ -248,23 +391,80 @@ export const UI: Record<Lang, UiText> = {
       "Hi! Я твой тренер разговорного английского.",
       "",
       "🗣 Разговор: ролевой диалог голосом, я отвечаю тоже голосом",
+      "💎 Точное слово: вспоминаем слова, которые ты в разговоре обошёл описанием",
       "🎧 Повторяй за мной: произнеси фразу и получи оценку произношения",
       "✍️ Диктант: послушай и напиши, что слышишь",
       "📈 Прогресс: серия дней и как идут дела",
-      "⚙️ Настройки: время напоминаний и часовой пояс",
+      "⚙️ Настройки: уровень сложности, время напоминаний и часовой пояс",
       "",
       "Или просто зажми микрофон и скажи что-нибудь по-английски.",
     ],
+    topicCategories: {
+      everyday: "🏙 Повседневное",
+      travel: "✈️ Путешествия",
+      work: "💼 Работа",
+      people: "👋 Общение",
+      problems: "🧯 Решить проблему",
+      opinions: "💭 Мнения",
+    },
     topics: {
       cafe: "☕ Кафе",
-      taxi: "🚕 Такси",
+      restaurant: "🍽 Ресторан",
       market: "🛒 Магазин",
-      neighbour: "🏠 Сосед",
-      work: "💼 Рабочий звонок",
+      taxi: "🚕 Такси",
       pharmacy: "💊 Аптека",
+      neighbour: "🏠 Сосед",
+      haircut: "💇 Парикмахерская",
+      delivery: "📦 Доставка",
+
+      airport: "✈️ Аэропорт",
+      hotel: "🏨 Отель",
+      directions: "🧭 Как пройти",
+      train: "🚆 Билеты на поезд",
+      flat: "🔑 Съём квартиры",
+      car: "🚗 Аренда машины",
+      border: "🛂 Паспортный контроль",
+      local: "🗺 Советы местных",
+
+      work: "💼 Рабочий звонок",
+      standup: "📋 Стендап",
+      interview: "🎤 Собеседование",
+      myjob: "🧩 Объяснить свою работу",
+      feedback: "💬 Фидбэк",
+      negotiation: "🤝 Переговоры",
+      smalltalk: "🫖 Болтовня с коллегой",
+      disagree: "🙅 Возразить коллеге",
+
       day: "🗓 Мой день",
-      random: "🎲 Удиви меня",
+      party: "🎉 Вечеринка",
+      plans: "📅 Планы на выходные",
+      movies: "🎬 Кино и сериалы",
+      hobby: "🎸 Хобби",
+      story: "📖 Рассказать историю",
+      advice: "🫶 Дать совет",
+      oldfriend: "👋 Старый друг",
+
+      doctor: "🩺 Врач",
+      bank: "🏦 Банк",
+      refund: "🧾 Возврат товара",
+      repair: "🔧 Ремонт",
+      support: "🎧 Техподдержка",
+      noise: "🔊 Шумный сосед",
+      lost: "🔍 Потерянная вещь",
+      bill: "🧮 Ошибка в счёте",
+
+      debate: "⚖️ Спор",
+      tech: "🤖 Технологии и ИИ",
+      culture: "🌍 Культуры",
+      dilemma: "🧠 Дилемма",
+      money: "💸 Деньги",
+      future: "🔮 Планы и мечты",
+      trip: "🏝 Лучшая и худшая поездка",
+      habits: "🌅 Привычки",
     },
+    surpriseMe: "🎲 Удиви меня",
+    ownTopic: "✍️ Своя тема",
+    ownTopicPrompt: "О чём хочешь поговорить? Ситуация, собеседник, что угодно. Напиши по-русски или по-английски, или скажи по-английски.",
 
     slower: "🐢 Медленнее",
     helpMeAnswer: "💡 Помоги ответить",
@@ -281,6 +481,9 @@ export const UI: Record<Lang, UiText> = {
     typeCityName: "Напиши название города текстом.",
     dictationNeedsTyping: "В диктанте фразу нужно напечатать.",
     useMenu: "Пользуйся меню внизу.",
+    thinking: "⏳ Готовлю ответ…",
+    stillWorking: "⏳ Я ещё отвечаю на предыдущее сообщение, поэтому это пропущу. Дождись ответа и пришли заново, если всё ещё нужно.",
+    stillWorkingButton: "⏳ Секунду, ещё готовлю ответ",
     somethingWentWrong: "Что-то пошло не так",
 
     repeatPrompt: "Послушай, потом зажми микрофон и повтори.",
@@ -292,6 +495,35 @@ export const UI: Record<Lang, UiText> = {
     dictationPrompt: "Напиши, что слышишь.",
     perfect: "Идеально!",
     correct: "Правильно",
+
+    upgrade: "💎 Точнее",
+    usedUnprompted: "🏆 Сам употребил в разговоре, слово выучено",
+    hint: "💡 Подсказка",
+    skip: "➡️ Пропустить",
+    vocabNothingDue: "Сейчас вспоминать нечего. Слова попадают сюда из 🗣 Разговора: когда ты описываешь вместо точного слова, я его ловлю (💎).",
+    ladder: (active, due, learned) => `Лестница слов: в работе ${active}, к повторению ${due}, выучено ${learned}`,
+    vocabReview: (count) => `💎 Вспомнить слова (${count})`,
+    vocabAnchorIntro: "В разговоре ты сказал:",
+    vocabAnchorAsk: (said) => `Скажи это ещё раз, но вместо «${said}» возьми точное слово.`,
+    vocabSituationAsk: "Послушай и ответь одной фразой. Сюда просится одно точное слово.",
+    vocabContrastAsk: "Две ситуации, два слова. Скажи по одной фразе про каждую, с подходящим словом.",
+    vocabStoryAsk: (meaning) => `Расскажи в двух предложениях реальный случай из своей жизни, где нужно слово со значением: ${meaning}`,
+    vocabPictureAsk: "Что происходит на картинке? Ответь одной фразой, с точным словом.",
+    ownPicture: "🎨 Своя картинка",
+    ownPicturePrompt: "Опиши картинку, которая у тебя самого связана с этим словом: кто на ней и что происходит. Напиши по-русски или по-английски, или скажи по-английски.",
+    drawing: "🎨 Рисую. Это до минуты, пришлю, когда будет готово.",
+    pictureLimit: "На сегодня лимит картинок исчерпан. Попробуй завтра.",
+    pictureFailed: "Эту картинку нарисовать не получилось. Попробуй описать иначе.",
+    vocabHintSaid: (said) => `Тогда ты сказал: ${said}`,
+    vocabHintMeaning: (meaning) => `Значение: ${meaning}`,
+    vocabHintLetters: (mask) => `Первые буквы: ${mask}`,
+    vocabNoMoreHints: "Подсказок больше нет. Попробуй ответить или нажми «Пропустить».",
+    vocabMissed: "Нужное слово",
+    vocabGoesWith: "С чем сочетается",
+    vocabNextIn: (days) => `Вернётся через ${days} ${plural("ru", days, { one: "день", few: "дня", many: "дней", other: "дня" })}, уже другим заданием.`,
+    vocabAmbushNext: "Последняя ступень: употреби его сам в разговоре. Напоминать не буду.",
+    vocabHold: "Засчитано, но с первыми буквами: вернётся завтра.",
+    vocabSummary: (passed, total) => `Готово: ${passed} из ${total}.`,
 
     yourWords: "Твои слова:",
     yourLatestWords: (shown, total) => `Твои слова (последние ${shown} из ${total}):`,
@@ -334,6 +566,17 @@ export const UI: Record<Lang, UiText> = {
     changeTimezone: "🌍 Сменить пояс",
     changeCourse: "🌐 Учу английский · Change language",
     courseSwitchNote: "Текущий урок закончится, слова и заметки тьютора сохранятся.\nSwitching ends the current lesson. Your words and tutor notes are kept.",
+    level: (label) => `🎚 Уровень: ${label}`,
+    changeLevel: "🎚 Сменить уровень",
+    levelTitle: "🎚 Уровень сложности",
+    levelNote: "От уровня зависит, как я говорю, насколько запутанные ситуации и насколько придирчивые исправления. Действует со следующего урока или упражнения.",
+    levels: {
+      auto: "🤖 Авто (решает тьютор)",
+      beginner: "🌱 Начальный (A1-A2)",
+      intermediate: "🌿 Средний (B1)",
+      upper: "🌳 Выше среднего (B2)",
+      advanced: "🏔 Продвинутый (C1)",
+    },
     addReminder: "⏰ Новое напоминание",
     pickHour: "Выбери час:",
     pickTime: "Выбери время:",

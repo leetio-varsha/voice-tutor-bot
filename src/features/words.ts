@@ -4,6 +4,7 @@ import { onButton, type BotContext } from "../context.js";
 import type { Course } from "../courses.js";
 import { menuLabels, type UiText } from "../i18n.js";
 import { finishCurrentLesson } from "../lessons.js";
+import { pictureInBackground } from "./pictures.js";
 import * as store from "../store.js";
 import type { Word } from "../store.js";
 import * as tutor from "../tutor.js";
@@ -14,6 +15,8 @@ export const words = new Composer<BotContext>();
 
 const WORD_LIST_LIMIT = 15;
 const WORD_BUTTONS_PER_ROW = 5;
+/** A word added by hand joins the ladder and first comes up the next day. */
+const MANUAL_WORD_FIRST_RECALL_HOURS = 20;
 
 type WordListMode = "listen" | "edit";
 
@@ -72,14 +75,17 @@ words.hears(menuLabels("words"), async (ctx) => {
 });
 
 onButton(words, "finish", async (ctx) => {
-  const { session, learner } = ctx;
+  const { session, learner, t } = ctx;
   const lessonWords = session.lessonId !== undefined ? await store.lessonWords(session.lessonId) : [];
   await finishCurrentLesson(session, learner.id);
+  // Words caught in this conversation are due at once: the first recall comes while the moment is fresh.
+  const { due } = await store.ladderStats(learner.id, ctx.course.target);
   if (lessonWords.length === 0) {
-    await ctx.reply(ctx.t.sessionDone);
+    await ctx.reply(t.sessionDone, { reply_markup: due ? new InlineKeyboard().text(t.vocabReview(due), "vocab:start") : undefined });
     return;
   }
-  const view = wordListView(ctx, lessonWords.slice(-WORD_LIST_LIMIT), ctx.t.sessionWords, "listen");
+  const view = wordListView(ctx, lessonWords.slice(-WORD_LIST_LIMIT), t.sessionWords, "listen");
+  if (due) view.keyboard.row().text(t.vocabReview(due), "vocab:start");
   await ctx.reply(view.text, { parse_mode: "HTML", reply_markup: view.keyboard });
 });
 
@@ -141,6 +147,8 @@ export async function saveWord(ctx: BotContext, input: string): Promise<void> {
   const { session, learner, course, t } = ctx;
   session.awaiting = undefined;
   const [word] = await store.addWords(learner.id, course.target, session.lessonId ?? null, "manual", [await tutor.translateWord(course, input)]);
+  await store.startLadder(learner.id, word!.id, MANUAL_WORD_FIRST_RECALL_HOURS);
+  if (word!.isNew) pictureInBackground(ctx, word!.id);
   await ctx.reply(`${esc(word!.isNew ? t.added : t.alreadyInList)}: ${wordLine(course, word!)}`, {
     parse_mode: "HTML",
     reply_markup: new InlineKeyboard().text(t.listen, `say:${word!.id}`).text(t.addAnother, "words:add"),
