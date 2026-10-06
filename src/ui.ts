@@ -1,6 +1,7 @@
 import { InlineKeyboard, Keyboard } from "grammy";
-import type { TopicId, UiText } from "./i18n.js";
+import type { UiText } from "./i18n.js";
 import type { PronunciationResult } from "./speech/types.js";
+import { TOPIC_CATEGORIES, TOPICS, type TopicCategory } from "./topics.js";
 
 export const CAPTION_LIMIT = 1024;
 // Words scoring below this are highlighted, both in drills and as "say more clearly" in conversation.
@@ -15,36 +16,36 @@ export const clip = (html: string) => (html.length <= CAPTION_LIMIT ? html : htm
 export const mainMenu = (t: UiText) =>
   new Keyboard()
     .text(t.menu.talk)
+    .text(t.menu.vocab)
+    .row()
     .text(t.menu.repeat)
-    .row()
     .text(t.menu.dictation)
-    .text(t.menu.words)
     .row()
+    .text(t.menu.words)
     .text(t.menu.progress)
+    .row()
     .text(t.menu.settings)
     .resized()
     .persistent()
     .placeholder(t.micPlaceholder);
 
-/** Scenarios are prompt text for Claude; button labels come from UiText.topics. */
-export const TOPICS: { id: TopicId; scenario?: string }[] = [
-  { id: "cafe", scenario: "ordering at a café" },
-  { id: "taxi", scenario: "a taxi ride: giving directions and small talk with the driver" },
-  { id: "market", scenario: "buying groceries at a market and asking about prices" },
-  { id: "neighbour", scenario: "meeting a new neighbour in the building" },
-  { id: "work", scenario: "a short call with a colleague" },
-  { id: "pharmacy", scenario: "explaining how they feel at a pharmacy" },
-  { id: "day", scenario: "chatting with a friend about their day and plans" },
-  { id: "random" },
-];
-
-export function topicKeyboard(t: UiText): InlineKeyboard {
+/** First step of the topic picker: categories, plus a random topic and the learner's own. */
+export function categoryKeyboard(t: UiText): InlineKeyboard {
   const keyboard = new InlineKeyboard();
-  TOPICS.forEach((topic, i) => {
+  TOPIC_CATEGORIES.forEach((category, i) => {
+    keyboard.text(t.topicCategories[category], `tcat:${category}`);
+    if (i % 2 === 1) keyboard.row();
+  });
+  return keyboard.row().text(t.surpriseMe, "topic:random").text(t.ownTopic, "topic:own");
+}
+
+export function topicKeyboard(t: UiText, category: TopicCategory): InlineKeyboard {
+  const keyboard = new InlineKeyboard();
+  TOPICS.filter((topic) => topic.category === category).forEach((topic, i) => {
     keyboard.text(t.topics[topic.id], `topic:${topic.id}`);
     if (i % 2 === 1) keyboard.row();
   });
-  return keyboard;
+  return keyboard.row().text(t.back, "topics");
 }
 
 export const lessonButtons = (t: UiText) =>
@@ -52,6 +53,9 @@ export const lessonButtons = (t: UiText) =>
 
 export const drillButtons = (t: UiText, next: "repeat:next" | "dictation:next") =>
   new InlineKeyboard().text(t.slower, "slower").text(t.next, next).primary().row().text(t.finish, "finish").danger();
+
+export const vocabButtons = (t: UiText) =>
+  new InlineKeyboard().text(t.hint, "vocab:hint").text(t.skip, "vocab:skip").row().text(t.finish, "finish").danger();
 
 export function wordScoresLine(result: PronunciationResult): string {
   return result.words

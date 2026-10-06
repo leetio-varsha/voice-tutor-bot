@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import { config } from "./config.js";
-import type { Course } from "./courses.js";
+import { LEVELS, type Course, type Level } from "./courses.js";
 import type { Session } from "./session.js";
 import type { PronunciationResult } from "./speech/types.js";
 import type { DrillRecord, TurnRecord } from "./store.js";
@@ -14,7 +14,7 @@ function systemPrompt(c: Course): string {
 
 Everything you write in ${c.targetName} is read aloud by a text-to-speech voice, so write it the way people actually talk: short sentences, everyday vocabulary, natural colloquial phrasing, and careful punctuation (it drives intonation). No emoji, markdown or transliteration in ${c.targetName} text. ${c.speechStyle}
 
-Calibrate to the learner's level: keep your ${c.targetName} one notch above theirs, and simplify when they struggle or fall back to ${c.nativeName}.
+When the learner has set a level, pitch your ${c.targetName} and the difficulty of every task at that level, even if your notes suggest another one, and simplify only for a turn or two when they are clearly lost. With no level set, calibrate yourself: keep your ${c.targetName} one notch above theirs, and simplify when they struggle or fall back to ${c.nativeName}.
 
 When correcting, prioritize errors that would confuse a native speaker (${c.errorPriorities}) over tiny slips. Correct at most two things per turn, explain each in one plain-${c.nativeName} sentence, and always give the corrected ${c.targetName}. When they do well, say so briefly and specifically.
 
@@ -62,14 +62,21 @@ function unescapeStrings(value: unknown): unknown {
 export interface LearnerContext {
   course: Course;
   name: string;
+  /** Difficulty the learner picked in Settings; null lets the tutor judge it from the notes. */
+  level: Level | null;
   notes: string;
   recentWords: string[];
+  /** Words on the last rung of the ladder: the learner should produce them unprompted, so the tutor must not say them. */
+  ambush: string[];
 }
 
 function learnerBlock(learner: LearnerContext): string {
   const notes = learner.notes ? `Your notes from earlier lessons:\n${learner.notes}` : "No earlier lessons yet.";
   const words = learner.recentWords.length ? `\nWords they are learning: ${learner.recentWords.join(", ")}` : "";
-  return `Learner: ${learner.name || "the learner"}\n${notes}${words}`;
+  const level = learner.level
+    ? `Level set by the learner: ${learner.level} (${LEVELS[learner.level].cefr}). ${LEVELS[learner.level].guidance}`
+    : "Level: not set; judge it from your notes and their replies.";
+  return `Learner: ${learner.name || "the learner"}\n${level}\n${notes}${words}`;
 }
 
 function transcript(session: Session, learner: LearnerContext): string {
@@ -90,16 +97,20 @@ export const LessonStartSchema = z.object({
   line_native: z.string(),
 });
 
-export function startLesson(learner: LearnerContext, topic?: string) {
+export function startLesson(learner: LearnerContext, topic: string | undefined, recentScenarios: string[]) {
   const topicLine = topic
-    ? `Topic chosen by the learner: ${topic}.`
+    ? `Topic chosen by the learner: ${topic}. Within it, invent a specific setting and a person with their own agenda, so the same topic plays out differently each time.`
     : `Pick a practical everyday situation (${learner.course.situations}), preferably one not covered in your notes.`;
+  const hidden = learner.ambush.length
+    ? `\n\nHidden target words: ${learner.ambush.join(", ")}. The learner should end up saying these unprompted, so never use them or their forms yourself; if the topic allows, choose a setup where they would come up naturally.`
+    : "";
+  const recent = recentScenarios.length ? `\n\nTheir latest role-plays, newest first. Do not repeat these setups:\n${recentScenarios.map((s) => `- ${s}`).join("\n")}` : "";
   return ask(
     learner.course,
     LessonStartSchema,
     `${learnerBlock(learner)}
 
-Start a new 15-minute speaking lesson as a role-play. ${topicLine} You play the other person. Open with your first line: 1-2 sentences that end with a question they can answer. If it fits naturally, set the scene so they get to use a word or structure they struggled with before.`,
+Start a new 15-minute speaking lesson as a role-play. ${topicLine} You play the other person. Open with your first line: 1-2 sentences that end with a question they can answer. If it fits naturally, set the scene so they get to use a word or structure they struggled with before.${recent}${hidden}`,
   );
 }
 
@@ -109,6 +120,15 @@ export const TurnSchema = z.object({
   corrected_target: z.string().nullable().describe("Their last line rewritten as a native speaker would say it; null if it was already fine"),
   feedback_native: z.string().describe("Short teaching note, at most 3 sentences"),
   new_words: z.array(WordSchema).describe("Up to 3 useful words or phrases from this exchange worth reviewing later"),
+  upgrades: z
+    .array(
+      z.object({
+        said: z.string().describe("Their own words, quoted exactly as they appear in their line: the roundabout description or the vague word"),
+        word: WordSchema.describe("One reusable word, phrasal verb or fixed collocation in dictionary form: at most three words, no article, no alternatives; and its translation"),
+      }),
+    )
+    .describe("Vocabulary gaps in their latest line: usually none or one, never more than 2"),
+  used_targets: z.array(z.string()).describe("Hidden target words they used correctly in their latest line, spelled as listed; empty if none, or if no list was given"),
 });
 
 export function tutorTurn(session: Session, learner: LearnerContext, learnerText: string, kind: "voice" | "text") {
@@ -119,6 +139,9 @@ export function tutorTurn(session: Session, learner: LearnerContext, learnerText
     kind === "voice"
       ? `spoken; transcribed by ${course.targetName} speech recognition, so ignore punctuation and capitalization, and expect a garbled line if they switched to ${course.nativeName}. You cannot hear the audio, so don't comment on pronunciation`
       : "typed; also check spelling";
+  const hidden = learner.ambush.length
+    ? `\n\nHidden target words: ${learner.ambush.join(", ")}. They have drilled these and now need to produce them unprompted. Never say these words or their forms yourself. When it fits the role-play, steer toward a moment where one of them is the natural thing for them to say.`
+    : "";
   return ask(
     course,
     TurnSchema,
@@ -132,7 +155,9 @@ ${transcript(session, learner)}
 Latest line from the learner (${how}):
 ${learnerText}
 
-Stay in character in reply_target. Keep the teaching in feedback_native, not in the reply. If they wrote or spoke in ${course.nativeName}, help them say it in ${course.targetName}. If they repeat a mistake from your notes, point out that it came up before.`,
+Stay in character in reply_target. Keep the teaching in feedback_native, not in the reply. If they wrote or spoke in ${course.nativeName}, help them say it in ${course.targetName}. If they repeat a mistake from your notes, point out that it came up before.
+
+Vocabulary gaps: list one in upgrades only when they described something instead of naming it, or leaned on a vague word (${course.vagueWords}) where a specific word, phrasal verb or fixed collocation exists that they could reuse in other conversations. The upgrade is that reusable unit, not a polished rewrite of their clause: rewrites belong in corrected_target. Most lines have no gap. Keep feedback_native for grammar and naturalness, and do not repeat upgrades in new_words.${hidden}`,
   );
 }
 
@@ -154,6 +179,74 @@ Conversation so far:
 ${transcript(session, learner)}
 
 The learner is stuck and asked for help answering the tutor's last line. Suggest two different replies they could realistically say, simple enough to repeat after hearing them once.`,
+  );
+}
+
+const VocabCardSchema = z.object({
+  task_target: z.string().describe("What you say aloud to the learner"),
+  task_native: z.string().describe("Faithful translation of task_target; like it, it must not give the answer away"),
+  neighbour: WordSchema.nullable().describe("Contrast task only: the neighbouring word; null for a situation task"),
+});
+
+/** A recall task for one word on the ladder: a fresh situation, or a contrast with a word it is confused with. */
+export function vocabCard(
+  learner: LearnerContext,
+  word: { term: string; meaning: string; said: string | null; moment: string | null },
+  kind: "situation" | "contrast",
+) {
+  const origin = word.said
+    ? `They once said "${word.said}" where "${word.term}" was the precise choice${word.moment ? ` (their full line: "${word.moment}")` : ""}.`
+    : "They added it to their list themselves.";
+  const task =
+    kind === "situation"
+      ? `Describe, in 1-2 spoken sentences, a concrete situation from a different area of life than the original one, and end with a question whose natural answer needs "${word.term}". Do not use that word, its forms or an equally precise synonym, and do not ask what the word is.`
+      : `Choose a neighbour: a near-synonym with a different shade of meaning or use, the kind of pair a learner mixes up (as with "exhausted" and "burned out"). It has to be a real near-synonym: do not take a word just because it shares the topic or is in their word list. Then describe two one-sentence situations: one calls for "${word.term}", the other for the neighbour, in an order you pick at random, using neither word nor its forms. End by asking them to say one sentence about each with the word that fits.`;
+  return ask(
+    learner.course,
+    VocabCardSchema,
+    `${learnerBlock(learner)}
+
+Vocabulary recall drill. The learner is practicing "${word.term}" (${word.meaning}). ${origin}
+
+${task}`,
+  );
+}
+
+const WordSceneSchema = z.object({
+  scene: z.string().describe("In English, 1-2 sentences an illustrator can draw: who or what, doing what, where"),
+});
+
+/** A scene that makes a word's meaning visible, as a prompt for the image model. */
+export function wordScene(course: Course, term: string, meaning: string) {
+  return ask(
+    course,
+    WordSceneSchema,
+    `Describe one picture that will help a learner remember the ${course.targetName} expression "${term}" (${meaning}). It should be a single concrete, slightly exaggerated scene in which the meaning is unmistakable without any words. For an idiom, let the literal image and the real meaning meet in the same scene. No text in the picture.`,
+  );
+}
+
+export const VocabCheckSchema = z.object({
+  used_correctly: z.boolean().describe("True only if they produced the target word, in any correct form, in a sentence where it fits"),
+  feedback_native: z.string().describe("At most 2 short sentences: what worked or what was off; for a contrast task, the difference between the two words in one line"),
+  model_target: z.string().describe("One natural sentence that answers the task with the target word"),
+  collocations_target: z.array(z.string()).describe("2 common collocations or patterns with the target word, a few words each"),
+});
+
+export function checkVocab(
+  learner: LearnerContext,
+  card: { term: string; meaning: string; task: string; neighbour?: string },
+  answer: string,
+  kind: "voice" | "text",
+) {
+  const how = kind === "voice" ? "spoken; transcribed by speech recognition, so ignore punctuation and allow for a near-homophone of the target word" : "typed";
+  return ask(
+    learner.course,
+    VocabCheckSchema,
+    `Vocabulary recall drill. Target word: "${card.term}" (${card.meaning}).${card.neighbour ? ` Contrast word: "${card.neighbour}".` : ""}
+Task given to the learner: ${card.task}
+Their answer (${how}): ${answer}
+
+The point is retrieving this exact word: a description around it or a different word, however reasonable, does not count. Ignore small grammar slips elsewhere in the sentence.${card.neighbour ? " In a contrast task both words have to be matched to the right situations." : ""}`,
   );
 }
 

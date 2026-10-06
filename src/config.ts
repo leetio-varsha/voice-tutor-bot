@@ -49,6 +49,7 @@ const openai = optional("OPENAI_API_KEY")
       ttsModel: optional("OPENAI_TTS_MODEL") ?? "gpt-4o-mini-tts",
       ttsVoice: optional("OPENAI_TTS_VOICE") ?? "marin",
       sttModel: optional("OPENAI_STT_MODEL") ?? "gpt-4o-transcribe",
+      imageModel: optional("OPENAI_IMAGE_MODEL") ?? "gpt-image-2.5-flare",
     }
   : undefined;
 

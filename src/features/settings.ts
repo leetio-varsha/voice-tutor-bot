@@ -1,7 +1,7 @@
 import { Composer, InlineKeyboard } from "grammy";
 import { isValidTimezone } from "../config.js";
 import { onButton, type BotContext } from "../context.js";
-import { COURSES, type Lang } from "../courses.js";
+import { COURSES, isLevel, LEVEL_IDS, type Lang } from "../courses.js";
 import { finishCurrentLesson } from "../lessons.js";
 import * as store from "../store.js";
 import type { Learner } from "../store.js";
@@ -10,7 +10,7 @@ import * as tutor from "../tutor.js";
 import { COURSE_PICKER, menuLabels, UI, type UiText } from "../i18n.js";
 import { esc, mainMenu } from "../ui.js";
 
-/** Reminder times, timezone and course, all through buttons; the settings message is edited in place. */
+/** Level, reminder times, timezone and course, all through buttons; the settings message is edited in place. */
 export const settings = new Composer<BotContext>();
 
 const MAX_LESSON_TIMES = 4;
@@ -31,11 +31,13 @@ const COMMON_TIMEZONES = [
 ] as const;
 
 function settingsView(learner: Learner, t: UiText) {
+  const level = (learner.learning && learner.levels[learner.learning]) ?? "auto";
   const now = localNow(learner.timezone);
   const clock = `${String(Math.floor(now.minutes / 60)).padStart(2, "0")}:${String(now.minutes % 60).padStart(2, "0")}`;
   const text = [
     `<b>${esc(t.settings)}</b>`,
     "",
+    esc(t.level(t.levels[level])),
     esc(t.reminders(learner.remindersEnabled)),
     esc(t.times(learner.lessonTimes.join(", ") || t.noTimes)),
     esc(t.timezone(learner.timezone, clock)),
@@ -46,7 +48,7 @@ function settingsView(learner: Learner, t: UiText) {
   keyboard.row();
   for (const time of learner.lessonTimes) keyboard.text(`✖ ${time}`, `set:del:${time}`);
   if (learner.lessonTimes.length < MAX_LESSON_TIMES) keyboard.text(t.addTime, "set:add");
-  keyboard.row().text(t.changeTimezone, "set:tz");
+  keyboard.row().text(t.changeLevel, "set:level").text(t.changeTimezone, "set:tz");
   keyboard.row().text(t.changeCourse, "set:course");
   return { text, keyboard };
 }
@@ -123,6 +125,26 @@ onButton(settings, /^set:tz:(.+)$/, async (ctx) => {
 onButton(settings, "set:city", async (ctx) => {
   ctx.session.awaiting = "city";
   await ctx.reply(ctx.t.typeCityPrompt);
+});
+
+onButton(settings, "set:level", async (ctx) => {
+  const current = ctx.learner.levels[ctx.course.target] ?? "auto";
+  const keyboard = new InlineKeyboard();
+  for (const level of ["auto", ...LEVEL_IDS] as const) {
+    keyboard.text(`${level === current ? "✅ " : ""}${ctx.t.levels[level]}`, `set:level:${level}`).row();
+  }
+  keyboard.text(ctx.t.back, "set:back");
+  await ctx.editMessageText(`<b>${esc(ctx.t.levelTitle)}</b>\n\n${esc(ctx.t.levelNote)}`, { parse_mode: "HTML", reply_markup: keyboard });
+});
+
+onButton(settings, /^set:level:(\w+)$/, async (ctx) => {
+  const picked = ctx.match[1];
+  const level = isLevel(picked) ? picked : null;
+  const course = ctx.course.target;
+  await store.setLevel(ctx.learner.id, course, level);
+  if (level) ctx.learner.levels[course] = level;
+  else delete ctx.learner.levels[course];
+  await redraw(ctx);
 });
 
 // Changing course is two taps (open the picker, then choose), so a stray tap can't switch it.

@@ -79,6 +79,29 @@ ALTER TABLE words ADD COLUMN IF NOT EXISTS learning TEXT NOT NULL DEFAULT 'ru' C
 DROP INDEX IF EXISTS words_learner_ru;
 CREATE UNIQUE INDEX IF NOT EXISTS words_learner_term ON words (learner_id, learning, lower(CASE learning WHEN 'en' THEN en ELSE ru END));
 
+-- The word ladder (src/features/vocab.ts): a word the learner talked around gets spaced recall tasks.
+-- stage NULL = a plain list word; 0-3 = recall drills; 4 = waiting to be used unprompted in conversation; 5 = learned.
+-- said is the learner's own wording that showed the gap; moment is their full line around it.
+ALTER TABLE words ADD COLUMN IF NOT EXISTS said TEXT;
+ALTER TABLE words ADD COLUMN IF NOT EXISTS moment TEXT;
+ALTER TABLE words ADD COLUMN IF NOT EXISTS stage SMALLINT;
+ALTER TABLE words ADD COLUMN IF NOT EXISTS due_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS words_due ON words (learner_id, learning, due_at) WHERE due_at IS NOT NULL;
+
+-- A ladder word's picture: the Telegram file id of the photo already sent, and the scene it shows.
+ALTER TABLE words ADD COLUMN IF NOT EXISTS image_file_id TEXT;
+ALTER TABLE words ADD COLUMN IF NOT EXISTS image_scene TEXT;
+
+-- One row per generated picture, to hold each learner to a daily allowance (every picture is a paid API call).
+CREATE TABLE IF NOT EXISTS picture_log (
+  learner_id BIGINT NOT NULL REFERENCES learners (telegram_id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS picture_log_learner ON picture_log (learner_id, created_at);
+
+-- Difficulty per course, e.g. {"en": "upper"}; a missing key means the tutor judges the level itself.
+ALTER TABLE learners ADD COLUMN IF NOT EXISTS levels JSONB NOT NULL DEFAULT '{}';
+
 CREATE TABLE IF NOT EXISTS sent_notifications (
   learner_id BIGINT NOT NULL REFERENCES learners (telegram_id),
   kind TEXT NOT NULL,
