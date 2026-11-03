@@ -1,4 +1,4 @@
-# MathiasSpeach
+# Voice Tutor Bot
 
 Telegram voice tutor for spoken Russian, and for spoken English for Russian speakers. POC.
 
@@ -108,7 +108,7 @@ Requirements: Node 22+, Docker (for Postgres). ffmpeg comes from `ffmpeg-static`
 
 ```bash
 npm install
-docker run -d --name mathias-pg -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=mathias -p 55432:5432 postgres:17-alpine
+docker run -d --name tutor-pg -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=tutor -p 55432:5432 postgres:17-alpine
 cp .env.example .env   # fill in keys; never commit .env
 npm run smoke:azure    # speech-to-text + pronunciation check, no Telegram needed; `npm run smoke:azure -- en` for English
 npm run smoke:tts      # renders out/voice-<provider>.ogg for each configured voice
@@ -123,7 +123,7 @@ Only one instance can poll Telegram at a time: stop the local bot while the Rail
 
 ## Deploy (Railway)
 
-Project `mathias-speech` has a `Postgres` service and a `bot` service. The bot's `DATABASE_URL` is `${{Postgres.DATABASE_URL}}`, and the other variables mirror `.env`.
+Project `voice-tutor-bot` has a `Postgres` service and a `bot` service. The bot's `DATABASE_URL` is `${{Postgres.DATABASE_URL}}`, and the other variables mirror `.env`.
 
 ```bash
 railway up --service bot --detach -m "<summary>"

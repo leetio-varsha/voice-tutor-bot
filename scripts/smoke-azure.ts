@@ -28,7 +28,7 @@ const SAMPLES: Record<Lang, { voice: string; spoken: string; target: string }> =
 };
 const { voice, spoken, target } = SAMPLES[lang];
 
-const dir = await mkdtemp(path.join(tmpdir(), "mathias-azure-"));
+const dir = await mkdtemp(path.join(tmpdir(), "tutor-azure-"));
 try {
   const aiff = path.join(dir, "sample.aiff");
   execFileSync("say", ["-v", voice, "-o", aiff, spoken]);
