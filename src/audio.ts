@@ -11,7 +11,7 @@ const FFMPEG = process.env.FFMPEG_PATH ?? ffmpegStatic ?? "ffmpeg";
 async function runFfmpeg(input: Buffer, outputName: string, args: string[]): Promise<Buffer> {
   // Temp files instead of pipes: WAV headers written to a pipe carry no length,
   // which some speech APIs reject.
-  const dir = await mkdtemp(path.join(tmpdir(), "mathias-"));
+  const dir = await mkdtemp(path.join(tmpdir(), "tutor-"));
   const inPath = path.join(dir, "input");
   const outPath = path.join(dir, outputName);
   try {
